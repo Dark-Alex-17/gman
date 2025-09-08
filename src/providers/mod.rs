@@ -1,0 +1,48 @@
+pub mod local;
+
+use crate::config::Config;
+use crate::providers::local::LocalProvider;
+use anyhow::Result;
+use serde::{Deserialize};
+use std::fmt::{Display, Formatter};
+use std::str::FromStr;
+use thiserror::Error;
+
+pub trait SecretProvider {
+    fn get_secret(&self, config: &Config, key: &str) -> Result<String>;
+    fn set_secret(&self, config: &Config, key: &str, value: &str) -> Result<()>;
+    fn update_secret(&self, config: &Config, key: &str, value: &str) -> Result<()>;
+    fn delete_secret(&self, key: &str) -> Result<()>;
+    fn list_secrets(&self) -> Result<Vec<String>>;
+    // fn sync(&self, config: &config) -> Result<()>;
+}
+
+#[derive(Debug, Error)]
+pub enum ParseProviderError {
+    #[error("unsupported provider '{0}'")]
+    Unsupported(String),
+}
+
+#[derive(Debug, Deserialize)]
+pub enum SupportedProvider {
+    Local(LocalProvider),
+}
+
+impl FromStr for SupportedProvider {
+    type Err = ParseProviderError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_lowercase().as_str() {
+            "local" => Ok(SupportedProvider::Local(LocalProvider)),
+            _ => Err(ParseProviderError::Unsupported(s.to_string())),
+        }
+    }
+}
+
+impl Display for SupportedProvider {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SupportedProvider::Local(_) => write!(f, "local"),
+        }
+    }
+}

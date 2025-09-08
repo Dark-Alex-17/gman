@@ -1,0 +1,278 @@
+use clap::{
+    CommandFactory, Parser, ValueEnum, crate_authors, crate_description, crate_name, crate_version,
+};
+
+use anyhow::{Context, Result};
+use clap::Subcommand;
+use crossterm::execute;
+use crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
+use gman::config::Config;
+use gman::providers::SupportedProvider;
+use gman::providers::local::LocalProvider;
+use heck::ToSnakeCase;
+use std::io::{self, IsTerminal, Read, Write};
+use std::panic;
+use std::panic::PanicHookInfo;
+
+mod utils;
+
+#[derive(Debug, Clone, ValueEnum)]
+enum OutputFormat {
+    Text,
+    Json,
+}
+
+#[derive(Debug, Clone, ValueEnum)]
+#[clap(rename_all = "lower")]
+pub enum ProviderKind {
+    Local,
+}
+
+impl From<ProviderKind> for SupportedProvider {
+    fn from(k: ProviderKind) -> Self {
+        match k {
+            ProviderKind::Local => SupportedProvider::Local(LocalProvider::default()),
+        }
+    }
+}
+
+#[derive(Debug, Parser)]
+#[command(
+	name = crate_name!(),
+	author = crate_authors!(),
+	version = crate_version!(),
+	about = crate_description!(),
+	help_template = "\
+{before-help}{name} {version}
+{author-with-newline}
+{about-with-newline}
+{usage-heading} {usage}
+
+{all-args}{after-help}"
+)]
+struct Cli {
+    /// Specify the output format
+    #[arg(short, long, value_enum)]
+    output: Option<OutputFormat>,
+
+    /// Specify the secret provider to use (defaults to 'provider' in config or 'local')
+    #[arg(long, value_enum)]
+    provider: Option<ProviderKind>,
+
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Add a secret to the configured secret provider
+    Add {
+        /// Name of the secret to store
+        name: String,
+    },
+
+    /// Decrypt a secret and print the plaintext
+    Get {
+        /// Name of the secret to retrieve
+        name: String,
+    },
+
+    /// Update an existing secret in the configured secret provider
+    Update {
+        /// Name of the secret to update
+        name: String,
+    },
+
+    /// Delete a secret from the configured secret provider
+    Delete {
+        /// Name of the secret to delete
+        name: String,
+    },
+
+    /// List all secrets stored in the configured secret provider
+    List {},
+
+    /// Generate shell completion scripts
+    Completions {
+        /// The shell to generate the script for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
+}
+
+fn main() -> Result<()> {
+    log4rs::init_config(utils::init_logging_config())?;
+    panic::set_hook(Box::new(|info| {
+        panic_hook(info);
+    }));
+    let cli = Cli::parse();
+    let config = load_config(&cli)?;
+    let secrets_provider = config.extract_provider();
+
+    match cli.command {
+        Commands::Add { name } => {
+            let plaintext =
+                read_all_stdin().with_context(|| "unable to read plaintext from stdin")?;
+            let snake_case_name = name.to_snake_case();
+            secrets_provider
+                .set_secret(&config, &snake_case_name, plaintext.trim_end())
+                .map(|_| match cli.output {
+                    Some(_) => (),
+                    None => println!("✓ Secret '{snake_case_name}' added to the vault."),
+                })?;
+        }
+        Commands::Get { name } => {
+            let snake_case_name = name.to_snake_case();
+            secrets_provider
+                .get_secret(&config, &snake_case_name)
+                .map(|secret| match cli.output {
+                    Some(OutputFormat::Json) => {
+                        let json_output = serde_json::json!({
+                            snake_case_name: secret
+                        });
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&json_output)
+                                .expect("failed to serialize secret to JSON")
+                        );
+                    }
+                    Some(OutputFormat::Text) | None => {
+                        println!("{}", secret);
+                    }
+                })?;
+        }
+        Commands::Update { name } => {
+            let plaintext =
+                read_all_stdin().with_context(|| "unable to read plaintext from stdin")?;
+            let snake_case_name = name.to_snake_case();
+            secrets_provider
+                .update_secret(&config, &snake_case_name, plaintext.trim_end())
+                .map(|_| match cli.output {
+                    Some(_) => (),
+                    None => println!("✓ Secret '{snake_case_name}' updated in the vault."),
+                })?;
+        }
+        Commands::Delete { name } => {
+            let snake_case_name = name.to_snake_case();
+            secrets_provider
+                .delete_secret(&snake_case_name)
+                .map(|_| match cli.output {
+                    None => println!("✓ Secret '{snake_case_name}' deleted from the vault."),
+                    Some(_) => (),
+                })?;
+        }
+        Commands::List {} => {
+            let secrets = secrets_provider.list_secrets()?;
+            if secrets.is_empty() {
+                match cli.output {
+                    Some(OutputFormat::Json) => {
+                        let json_output = serde_json::json!([]);
+                        println!("{}", serde_json::to_string_pretty(&json_output)?);
+                    }
+                    Some(OutputFormat::Text) => (),
+                    None => println!("The vault is empty."),
+                }
+            } else {
+                match cli.output {
+                    Some(OutputFormat::Json) => {
+                        let json_output = serde_json::json!(secrets);
+                        println!("{}", serde_json::to_string_pretty(&json_output)?);
+                        return Ok(());
+                    }
+                    Some(OutputFormat::Text) => {
+                        for key in &secrets {
+                            println!("- {}", key);
+                        }
+                    }
+                    None => {
+                        println!("Secrets in the vault:");
+                        for key in &secrets {
+                            println!("- {}", key);
+                        }
+                    }
+                }
+            }
+        }
+        Commands::Completions { shell } => {
+            let mut cmd = Cli::command();
+            let bin_name = cmd.get_name().to_string();
+            clap_complete::generate(shell, &mut cmd, bin_name, &mut io::stdout());
+        }
+    }
+
+    Ok(())
+}
+
+fn load_config(cli: &Cli) -> Result<Config> {
+    let mut config: Config = confy::load("gman", "config")?;
+    if let Some(local_password_file) = Config::local_provider_password_file() {
+        config.password_file = Some(local_password_file);
+    }
+
+    if let Some(provider_kind) = &cli.provider {
+        let provider: SupportedProvider = provider_kind.clone().into();
+        config.provider = provider.into();
+    }
+
+    Ok(config)
+}
+
+fn read_all_stdin() -> Result<String> {
+    if io::stdin().is_terminal() {
+        #[cfg(not(windows))]
+        eprintln!("Enter the text to encrypt, then press Ctrl-D twice to finish input");
+        #[cfg(windows)]
+        eprintln!("Enter the text to encrypt, then press Ctrl-Z to finish input");
+        io::stderr().flush()?;
+    }
+    let mut buf = String::new();
+    let stdin_tty = io::stdin().is_terminal();
+    let stdout_tty = io::stdout().is_terminal();
+    io::stdin().read_to_string(&mut buf)?;
+
+    if stdin_tty && stdout_tty && !buf.ends_with('\n') {
+        let mut out = io::stdout().lock();
+        out.write_all(b"\n")?;
+        out.flush()?;
+    }
+    Ok(buf)
+}
+
+#[cfg(debug_assertions)]
+fn panic_hook(info: &PanicHookInfo<'_>) {
+    use backtrace::Backtrace;
+    use crossterm::style::Print;
+
+    let location = info.location().unwrap();
+
+    let msg = match info.payload().downcast_ref::<&'static str>() {
+        Some(s) => *s,
+        None => match info.payload().downcast_ref::<String>() {
+            Some(s) => &s[..],
+            None => "Box<Any>",
+        },
+    };
+
+    let stacktrace: String = format!("{:?}", Backtrace::new()).replace('\n', "\n\r");
+
+    disable_raw_mode().unwrap();
+    execute!(
+        io::stdout(),
+        LeaveAlternateScreen,
+        Print(format!(
+            "thread '<unnamed>' panicked at '{msg}', {location}\n\r{stacktrace}"
+        )),
+    )
+    .unwrap();
+}
+
+#[cfg(not(debug_assertions))]
+fn panic_hook(info: &PanicHookInfo<'_>) {
+    use human_panic::{handle_dump, metadata, print_msg};
+
+    let meta = metadata!();
+    let file_path = handle_dump(&meta, info);
+    disable_raw_mode().unwrap();
+    execute!(io::stdout(), LeaveAlternateScreen).unwrap();
+    print_msg(file_path, &meta).expect("human-panic: printing error message to console failed");
+}
