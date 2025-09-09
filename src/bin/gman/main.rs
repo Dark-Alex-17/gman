@@ -1,21 +1,30 @@
 use clap::{
     CommandFactory, Parser, ValueEnum, crate_authors, crate_description, crate_name, crate_version,
 };
+use std::collections::HashMap;
+use std::ffi::OsString;
 
-use anyhow::{Context, Result};
+use crate::command::preview_command;
+use anyhow::{Context, Result, anyhow};
 use clap::Subcommand;
 use crossterm::execute;
 use crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
-use gman::config::Config;
-use gman::providers::SupportedProvider;
+use gman::config::{Config, RunConfig};
 use gman::providers::local::LocalProvider;
+use gman::providers::{SecretProvider, SupportedProvider};
 use heck::ToSnakeCase;
+use log::debug;
 use std::io::{self, IsTerminal, Read, Write};
 use std::panic;
 use std::panic::PanicHookInfo;
+use std::process::Command;
 use validator::Validate;
 
+mod command;
 mod utils;
+
+const ARG_FORMAT_PLACEHOLDER_KEY: &str = "{key}";
+const ARG_FORMAT_PLACEHOLDER_VALUE: &str = "{value}";
 
 #[derive(Debug, Clone, ValueEnum)]
 enum OutputFormat {
@@ -60,11 +69,19 @@ struct Cli {
     #[arg(long, value_enum)]
     provider: Option<ProviderKind>,
 
+    /// Specify a run profile to use when wrapping a command
+    #[arg(long)]
+    profile: Option<String>,
+
+    /// Output the command that will be run instead of executing it
+    #[arg(long)]
+    dry_run: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Clone, Debug)]
 enum Commands {
     /// Add a secret to the configured secret provider
     Add {
@@ -91,11 +108,16 @@ enum Commands {
     },
 
     /// List all secrets stored in the configured secret provider (if supported by the provider)
-		/// If a provider does not support listing secrets, this command will return an error.
+    /// If a provider does not support listing secrets, this command will return an error.
     List {},
 
     /// Sync secrets with remote storage (if supported by the provider)
     Sync {},
+
+    /// Wrap the provided command and supply it with secrets as environment variables or as
+    /// configured in a corresponding run profile
+    #[command(external_subcommand)]
+    External(Vec<OsString>),
 
     /// Generate shell completion scripts
     Completions {
@@ -200,6 +222,9 @@ fn main() -> Result<()> {
                     Some(_) => (),
                 })?;
         }
+        Commands::External(tokens) => {
+            wrap_and_run_command(secrets_provider, &config, tokens, cli.profile, cli.dry_run)?;
+        }
         Commands::Completions { shell } => {
             let mut cmd = Cli::command();
             let bin_name = cmd.get_name().to_string();
@@ -223,6 +248,155 @@ fn load_config(cli: &Cli) -> Result<Config> {
     }
 
     Ok(config)
+}
+
+pub fn wrap_and_run_command(
+    secrets_provider: Box<dyn SecretProvider>,
+    config: &Config,
+    tokens: Vec<OsString>,
+    profile_name: Option<String>,
+    dry_run: bool,
+) -> Result<()> {
+    let (prog, args) = tokens
+        .split_first()
+        .with_context(|| "need a command to run")?;
+    let run_config_profile_name = if let Some(ref profile_name) = profile_name {
+        profile_name.as_str()
+    } else {
+        prog.to_str()
+            .ok_or_else(|| anyhow!("failed to convert program name to string"))?
+    };
+    let run_config_opt = config.run_configs.as_ref().and_then(|configs| {
+        configs.iter().filter(|c| c.name.is_some()).find(|c| {
+            c.name.as_ref().expect("failed to unwrap run config name") == run_config_profile_name
+        })
+    });
+
+    if let Some(run_cfg) = run_config_opt {
+        let secrets_result =
+            run_cfg
+                .secrets
+                .as_ref()
+                .expect("no secrets configured for run profile")
+                .iter()
+                .map(|key| {
+                    let secret_name = key.to_snake_case();
+                    debug!(
+                        "Retrieving secret '{secret_name}' for run profile '{}'",
+                        run_config_profile_name
+                    );
+                    secrets_provider
+                    .get_secret(&config, key.to_snake_case().as_str())
+                    .ok()
+                    .map_or_else(
+                        || {
+                            debug!("Failed to fetch secret '{secret_name}' from secret provider");
+                            (
+                                key.to_uppercase(),
+                                Err(anyhow!(
+                                    "Failed to fetch secret '{secret_name}' from secret provider"
+                                )),
+                            )
+                        },
+                        |value| if dry_run {
+													(key.to_uppercase(), Ok("*****".into()))
+												} else {
+													(key.to_uppercase(), Ok(value))
+												},
+                    )
+                });
+        let err = secrets_result
+            .clone()
+            .filter(|(_, r)| r.is_err())
+            .collect::<Vec<_>>();
+        if !err.is_empty() {
+            return Err(anyhow!(
+                "Failed to fetch {} secrets from secret provider. {}",
+                err.len(),
+                err.iter()
+                    .map(|(k, _)| format!("\n'{}'", k))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+
+        let secrets = secrets_result
+            .map(|(k, r)| (k, r.unwrap()))
+            .collect::<HashMap<_, _>>();
+        let mut cmd_def = Command::new(prog);
+
+        if run_cfg.flag.is_some() {
+            let args = parse_args(args, run_cfg, secrets.clone(), dry_run)?;
+            run_cmd(&mut cmd_def.args(&args), dry_run)?;
+        } else {
+            run_cmd(cmd_def.args(args).envs(secrets), dry_run)?;
+        }
+    } else {
+        debug!("No run profile found for '{run_config_profile_name}'");
+        return Err(anyhow!(
+            "No run profile found for '{run_config_profile_name}'"
+        ));
+    }
+
+    Ok(())
+}
+
+fn run_cmd(cmd: &mut Command, dry_run: bool) -> Result<()> {
+    if dry_run {
+        eprintln!("Command to be executed: {}", preview_command(cmd));
+    } else {
+        cmd.status()
+            .with_context(|| format!("failed to execute command '{:?}'", cmd))?;
+    }
+    Ok(())
+}
+
+fn parse_args(
+    args: &[OsString],
+    run_config: &RunConfig,
+    secrets: HashMap<String, String>,
+    dry_run: bool,
+) -> Result<Vec<OsString>> {
+    let args = args.to_vec();
+    let flag = run_config
+        .flag
+        .as_ref()
+        .ok_or_else(|| anyhow!("flag must be set if arg_format is set"))?;
+    let flag_position = run_config
+        .flag_position
+        .ok_or_else(|| anyhow!("flag_position must be set if flag is set"))?;
+    let arg_format = run_config
+        .arg_format
+        .as_ref()
+        .ok_or_else(|| anyhow!("arg_format must be set if flag is set"))?;
+    let mut args = args.to_vec();
+
+    if flag_position > args.len() {
+        secrets.iter().for_each(|(k, v)| {
+            let v = if dry_run { "*****" } else { v };
+            args.push(OsString::from(flag));
+            args.push(OsString::from(
+                arg_format
+                    .replace(ARG_FORMAT_PLACEHOLDER_KEY, k)
+                    .replace(ARG_FORMAT_PLACEHOLDER_VALUE, v),
+            ));
+        })
+    } else {
+        secrets.iter().for_each(|(k, v)| {
+            let v = if dry_run { "*****" } else { v };
+            args.insert(
+                flag_position,
+                OsString::from(
+                    arg_format
+                        .replace(ARG_FORMAT_PLACEHOLDER_KEY, k)
+                        .replace(ARG_FORMAT_PLACEHOLDER_VALUE, v),
+                ),
+            );
+            args.insert(flag_position, OsString::from(flag));
+        })
+    }
+
+    Ok(args)
 }
 
 fn read_all_stdin() -> Result<String> {

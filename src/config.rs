@@ -3,8 +3,52 @@ use log::debug;
 use serde::{Deserialize, Serialize};
 use serde_with::DisplayFromStr;
 use serde_with::serde_as;
+use std::borrow::Cow;
 use std::path::PathBuf;
-use validator::Validate;
+use validator::{Validate, ValidationError};
+
+#[derive(Debug, Clone, Validate, Serialize, Deserialize)]
+#[validate(schema(function = "flags_or_none", skip_on_field_errors = false))]
+pub struct RunConfig {
+    #[validate(required)]
+    pub name: Option<String>,
+    #[validate(required)]
+    pub secrets: Option<Vec<String>>,
+    pub flag: Option<String>,
+    #[validate(range(min = 1))]
+    pub flag_position: Option<usize>,
+    pub arg_format: Option<String>,
+}
+
+fn flags_or_none(run_config: &RunConfig) -> Result<(), ValidationError> {
+    match (
+        &run_config.flag,
+        &run_config.flag_position,
+        &run_config.arg_format,
+    ) {
+        (Some(_), Some(_), Some(format)) => {
+					let has_key = format.contains("{key}");
+					let has_value = format.contains("{value}");
+					if has_key && has_value {
+						Ok(())
+					} else {
+						let mut err = ValidationError::new("missing_placeholders");
+						err.message = Some(Cow::Borrowed("must contain both '{key}' and '{value}' (with the '{' and '}' characters) in the arg_format"));
+						err.add_param(Cow::Borrowed("has_key"), &has_key);
+						err.add_param(Cow::Borrowed("has_value"), &has_value);
+						Err(err)
+					}
+				},
+			(None, None, None) => Ok(()),
+        _ => {
+            let mut err = ValidationError::new("both_or_none");
+            err.message = Some(Cow::Borrowed(
+                "When defining a flag to pass secrets into the command with, all of 'flag', 'flag_position', and 'arg_format' must be defined in the run configuration",
+            ));
+            Err(err)
+        }
+    }
+}
 
 #[serde_as]
 #[derive(Debug, Clone, Validate, Serialize, Deserialize)]
@@ -13,12 +57,14 @@ pub struct Config {
     pub provider: SupportedProvider,
     pub password_file: Option<PathBuf>,
     pub git_branch: Option<String>,
-		/// The git remote URL to push changes to (e.g. git@github.com:user/repo.git)
+    /// The git remote URL to push changes to (e.g. git@github.com:user/repo.git)
     pub git_remote_url: Option<String>,
     pub git_user_name: Option<String>,
     #[validate(email)]
     pub git_user_email: Option<String>,
-		pub git_executable: Option<PathBuf>,
+    pub git_executable: Option<PathBuf>,
+    #[validate(nested)]
+    pub run_configs: Option<Vec<RunConfig>>,
 }
 
 impl Default for Config {
@@ -30,7 +76,8 @@ impl Default for Config {
             git_remote_url: None,
             git_user_name: None,
             git_user_email: None,
-						git_executable: None,
+            git_executable: None,
+            run_configs: None,
         }
     }
 }
