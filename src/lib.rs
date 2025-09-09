@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use argon2::{
 	password_hash::{rand_core::RngCore, SaltString},
-	Algorithm, Argon2, Params, PasswordHasher, Version,
+	Algorithm, Argon2, Params, Version,
 };
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use chacha20poly1305::{
@@ -25,28 +25,24 @@ pub (in crate) const SALT_LEN: usize = 16;
 pub (in crate) const NONCE_LEN: usize = 24;
 pub (in crate) const KEY_LEN: usize = 32;
 
-fn derive_key(password: &SecretString, salt: &SaltString) -> Result<(Key, String)> {
+fn derive_key(password: &SecretString, salt: &[u8]) -> Result<Key> {
     let params = Params::new(ARGON_M_COST_KIB, ARGON_T_COST, ARGON_P, Some(KEY_LEN))
         .map_err(|e| anyhow!("argon2 params error: {:?}", e))?;
     let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-
-    let phc = argon
-        .hash_password(password.expose_secret().as_bytes(), salt)
-        .map_err(|e| anyhow!("argon2 hash error: {:?}", e))?
-        .to_string();
 
     let mut key_bytes = [0u8; KEY_LEN];
     argon
         .hash_password_into(
             password.expose_secret().as_bytes(),
-            salt.to_string().as_bytes(),
+            salt,
             &mut key_bytes,
         )
         .map_err(|e| anyhow!("argon2 into error: {:?}", e))?;
 
+    let cloned_key_bytes = key_bytes.clone();
+    let key = Key::from_slice(&cloned_key_bytes);
     key_bytes.zeroize();
-    let key = Key::from_slice(&key_bytes);
-    Ok((*key, phc))
+    Ok(*key)
 }
 
 pub fn encrypt_string(password: impl Into<SecretString>, plaintext: &str) -> Result<String> {
@@ -56,7 +52,7 @@ pub fn encrypt_string(password: impl Into<SecretString>, plaintext: &str) -> Res
     let mut nonce_bytes = [0u8; NONCE_LEN];
     OsRng.fill_bytes(&mut nonce_bytes);
 
-    let (key, _phc) = derive_key(&password, &salt)?;
+    let key = derive_key(&password, salt.as_str().as_bytes())?;
     let cipher = XChaCha20Poly1305::new(&key);
 
     let aad = format!("{};{}", HEADER, VERSION);
@@ -83,7 +79,7 @@ pub fn encrypt_string(password: impl Into<SecretString>, plaintext: &str) -> Res
         m = ARGON_M_COST_KIB,
         t = ARGON_T_COST,
         p = ARGON_P,
-        salt = B64.encode(salt.to_string().as_bytes()),
+        salt = B64.encode(salt.as_str().as_bytes()),
         nonce = B64.encode(nonce_bytes),
         ct = B64.encode(&ct),
     );
@@ -139,23 +135,9 @@ pub fn decrypt_string(password: impl Into<SecretString>, envelope: &str) -> Resu
         bail!("nonce length mismatch");
     }
 
-    let params =
-        Params::new(m, t, p, Some(KEY_LEN)).map_err(|e| anyhow!("argon2 params error: {:?}", e))?;
-    let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let key = derive_key(&password, &salt_bytes)?;
 
-    let mut key_bytes = [0u8; KEY_LEN];
-    argon
-        .hash_password_into(
-            password.expose_secret().as_bytes(),
-            &salt_bytes,
-            &mut key_bytes,
-        )
-        .map_err(|e| anyhow!("argon2 derive error: {:?}", e))?;
-    let key_clone = key_bytes;
-    let key = Key::from_slice(&key_clone);
-    key_bytes.zeroize();
-
-    let cipher = XChaCha20Poly1305::new(key);
+    let cipher = XChaCha20Poly1305::new(&key);
 
     let aad = format!("{};{}", HEADER, VERSION);
     let nonce = XNonce::from_slice(&nonce_bytes);
@@ -193,5 +175,48 @@ mod tests {
     fn wrong_password_fails() {
         let env = encrypt_string(SecretString::new("pw1".into()), "hello").unwrap();
         assert!(decrypt_string(SecretString::new("pw2".into()), &env).is_err());
+    }
+
+    #[test]
+    fn empty_plaintext() {
+        let pw = SecretString::new("password".into());
+        let msg = "";
+        let env = encrypt_string(pw.clone(), msg).unwrap();
+        let out = decrypt_string(pw, &env).unwrap();
+        assert_eq!(msg, out);
+    }
+
+    #[test]
+    fn empty_password() {
+        let pw = SecretString::new("".into());
+        let msg = "hello";
+        let env = encrypt_string(pw.clone(), msg).unwrap();
+        let out = decrypt_string(pw, &env).unwrap();
+        assert_eq!(msg, out);
+    }
+
+    #[test]
+    fn long_plaintext() {
+        let pw = SecretString::new("password".into());
+        let msg = "a".repeat(1000);
+        let env = encrypt_string(pw.clone(), msg.as_str()).unwrap();
+        let out = decrypt_string(pw, &env).unwrap();
+        assert_eq!(msg, out);
+    }
+
+    #[test]
+    fn tampered_ciphertext() {
+        let pw = SecretString::new("password".into());
+        let msg = "hello";
+        let env = encrypt_string(pw.clone(), msg).unwrap();
+        let mut parts: Vec<&str> = env.split(';').collect();
+        let ct_b64 = parts[6].strip_prefix("ct=").unwrap();
+        let mut ct = base64::engine::general_purpose::STANDARD.decode(ct_b64).unwrap();
+        ct[0] ^= 0x01; // Flip a bit
+        let new_ct_b64 = base64::engine::general_purpose::STANDARD.encode(&ct);
+        let new_ct_part = format!("ct={}", new_ct_b64);
+        parts[6] = &new_ct_part;
+        let tampered_env = parts.join(";");
+        assert!(decrypt_string(pw, &tampered_env).is_err());
     }
 }
