@@ -140,7 +140,7 @@ fn main() -> Result<()> {
         Commands::Add { name } => {
             let plaintext =
                 read_all_stdin().with_context(|| "unable to read plaintext from stdin")?;
-            let snake_case_name = name.to_snake_case();
+            let snake_case_name = name.to_snake_case().to_uppercase();
             secrets_provider
                 .set_secret(&config, &snake_case_name, plaintext.trim_end())
                 .map(|_| match cli.output {
@@ -149,7 +149,7 @@ fn main() -> Result<()> {
                 })?;
         }
         Commands::Get { name } => {
-            let snake_case_name = name.to_snake_case();
+            let snake_case_name = name.to_snake_case().to_uppercase();
             secrets_provider
                 .get_secret(&config, &snake_case_name)
                 .map(|secret| match cli.output {
@@ -171,7 +171,7 @@ fn main() -> Result<()> {
         Commands::Update { name } => {
             let plaintext =
                 read_all_stdin().with_context(|| "unable to read plaintext from stdin")?;
-            let snake_case_name = name.to_snake_case();
+            let snake_case_name = name.to_snake_case().to_uppercase();
             secrets_provider
                 .update_secret(&config, &snake_case_name, plaintext.trim_end())
                 .map(|_| match cli.output {
@@ -180,7 +180,7 @@ fn main() -> Result<()> {
                 })?;
         }
         Commands::Delete { name } => {
-            let snake_case_name = name.to_snake_case();
+            let snake_case_name = name.to_snake_case().to_uppercase();
             secrets_provider
                 .delete_secret(&snake_case_name)
                 .map(|_| match cli.output {
@@ -280,13 +280,13 @@ pub fn wrap_and_run_command(
                 .expect("no secrets configured for run profile")
                 .iter()
                 .map(|key| {
-                    let secret_name = key.to_snake_case();
+                    let secret_name = key.to_snake_case().to_uppercase();
                     debug!(
                         "Retrieving secret '{secret_name}' for run profile '{}'",
                         run_config_profile_name
                     );
                     secrets_provider
-                    .get_secret(&config, key.to_snake_case().as_str())
+                    .get_secret(&config, key.to_snake_case().to_uppercase().as_str())
                     .ok()
                     .map_or_else(
                         || {

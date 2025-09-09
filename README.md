@@ -1,150 +1,209 @@
-# gman
-A universal credential management CLI with a unified interface for all your secret providers.
+# gman - Universal Credential Manager
 
-`gman` provides a single, consistent set of commands to manage secrets, whether they are stored in a secure local vault or any other supported provider. Switch between providers on the fly, script interactions with JSON output, and manage your secrets with ease.
+`gman` is a command-line tool designed to streamline credential and secret management for your scripts, automations, and 
+applications. It provides a single, secure interface to store, retrieve, and inject secrets, eliminating the need to 
+juggle different methods like configuration files or environment variables for each tool.
+
+## Overview
+
+The core philosophy of `gman` is to act as a universal wrapper for any command that requires credentials. You can store 
+your secrets—like API tokens, passwords, or certificates—in an encrypted vault backed by various providers. Then, you 
+can either fetch them directly or, more powerfully, execute commands through `gman`, which securely injects the 
+necessary secrets as environment variables or command-line flags.
 
 ## Features
 
-- **Secure Local Storage**: Out-of-the-box support for a local vault (`~/.config/gman/vault.yml`) with strong encryption using **Argon2id** for key derivation and **XChaCha20-Poly1305** for authenticated encryption.
-- **Unified Interface**: A consistent command set (`add`, `get`, `list`, etc.) for every supported provider.
-- **Provider Selection**: Explicitly choose a provider for a command using the `--provider` flag.
-- **Flexible Output**: Get secrets in plaintext for scripting, structured `json` for applications, or human-readable text.
-- **Password Management**: For local secret storage: securely prompts for the vault password. For automation, a password can be supplied via a `~/.gman_password` file, similar to Ansible Vault.
-- **Shell Completions**: Generate completion scripts for Bash, Zsh, Fish, and other shells.
-- **Standardized Naming**: Secret names are automatically converted to `snake_case` to ensure consistency.
+- **Secure, Encrypted Storage**: All secrets are stored in an encrypted state using strong cryptography.
+- **Pluggable Providers**: Supports different backends for secret storage. The default is a local file-based system.
+- **Git Synchronization**: The `local` provider can synchronize your encrypted secrets across multiple systems using a 
+  private Git repository.
+- **Seamless Command Wrapping**: Run any command through `gman` to automatically provide it with the secrets it needs 
+  (e.g., `gman aws s3 ls`).
+- **Customizable Run Profiles**: Define how secrets are passed to commands, either as environment variables (default) or 
+  as specific command-line flags.
+- **Secret Name Standardization**: Enforces `snake_case` for all secret names to ensure consistency.
+- **Direct Secret Access**: Retrieve plaintext secrets directly when needed (e.g., `gman get my_api_key`).
+- **Dry Run Mode**: Preview the command and the secrets that will be injected without actually executing it using the 
+  `--dry-run` flag.
 
 ## Installation
 
-Ensure you have Rust and Cargo installed. Then, clone the repository and install the binary:
+### Cargo
+If you have Cargo installed, then you can install gman from Crates.io:
 
-```sh
-git clone https://github.com/Dark-Alex-17/gman.git
-cd gman
-cargo install --path .
+```shell
+cargo install gman
+
+# If you encounter issues installing, try installing with '--locked'
+cargo install --locked gman
 ```
 
 ## Configuration
 
-`gman` is configured through a YAML file located at `~/.config/gman/config.yml`.
+`gman` is configured via a YAML file located somewhere different for each OS:
 
-A default configuration is created automatically. Here is an example:
+### Linux
+```
+$HOME/.config/gman/config.yml
+```
+
+### Mac
+```
+$HOME/Library/Application Support/gman/config.yml
+```
+
+### Windows
+```
+%APPDATA%/Roaming/gman/config.yml
+```
+
+### Default Configuration
 
 ```yaml
-# ~/.config/gman/config.yml
 ---
 provider: local
-password_file: null # Can be set to a path like /home/user/.gman_password
+password_file: ~/.gman_password
+
+# Optional Git sync settings for the 'local' provider
+git_branch: null # Defaults to 'main'
+git_remote_url: null # Required for Git sync
+git_user_name: null # Defaults to global git config user.name
+git_user_email: null # Defaults to global git config user.email
+git_executable: null # Defaults to 'git' in PATH
+run_configs: null # List of run configurations (profiles)
 ```
 
-### Vault File
+### Provider: `local`
 
-For the `local` provider, secrets are stored in an encrypted vault file at `~/.config/gman/vault.yml`. This file should not be edited manually.
+The default `local` provider stores an encrypted vault file on your filesystem. For use across multiple systems, it can 
+sync with a remote Git repository.
 
-### Password File
+**Important Notes for Git Sync:**
+- You **must** create the remote repository on your Git provider (e.g., GitHub) *before* attempting to sync.
+- The `git_remote_url` must be in SSH or HTTPS format (e.g., `git@github.com:your-user/your-repo.git`).
 
-To avoid being prompted for a password with every command, you can create a file at `~/.gman_password` containing your vault password. `gman` will automatically detect and use this file if it exists.
-
-```sh
-# Create the password file with the correct permissions
-echo "your-super-secret-password" > ~/.gman_password
-chmod 600 ~/.gman_password
+**Example `local` provider config for Git sync:**
+```yaml
+provider: local
+git_branch: main
+git_remote_url: "git@github.com:my-user/gman-secrets.git"
+git_user_name: "Your Name"
+git_user_email: "your.email@example.com"
 ```
+
+### Run Configurations
+
+Run configurations (or "profiles") tell `gman` how to inject secrets into a command. When you run `gman <command>`, it 
+looks for a profile with a `name` matching `<command>`. If found, it injects the specified secrets. If no profile is 
+found, `gman` will error out and report that it could not find the run config with that name.
+
+#### Important: Secret names are always injected in `UPPER_SNAKE_CASE` format.
+
+#### Basic Run Config (Environment Variables)
+
+By default, secrets are injected as environment variables. The two required fields are `name` and `secrets`.
+
+**Example:** A profile for the `aws` CLI.
+```yaml
+run_configs:
+  - name: aws
+    secrets:
+      - aws_access_key_id
+      - aws_secret_access_key
+```
+When you run `gman aws ...`, `gman` will fetch these two secrets and expose them as environment variables to the `aws` 
+process.
+
+#### Advanced Run Config (Command-Line Flags)
+
+For applications that don't read environment variables, you can configure `gman` to pass secrets as command-line flags. 
+This requires three additional fields: `flag`, `flag_position`, and `arg_format`.
+
+- `flag`: The flag to use (e.g., `-e`).
+- `flag_position`: An integer indicating where to insert the flag in the command's arguments. `1` is immediately after 
+  the command name.
+- `arg_format`: A string that defines how the secret is formatted. It **must** contain the placeholders `{key}` and 
+  `{value}`.
+
+**Example:** A profile for `docker run` that uses the `-e` flag.
+```yaml
+run_configs:
+  - name: docker
+    secrets:
+      - my_app_api_key
+      - my_app_db_password
+    flag: -e
+    flag_position: 2 # In 'docker run ...', the flag comes after 'run', so position 2.
+    arg_format: "{key}={value}"
+```
+When you run `gman docker run my-image`, `gman` will execute a command similar to:
+`docker run -e MY_APP_API_KEY=... -e MY_APP_DB_PASSWORD=... my-image`
 
 ## Usage
 
-`gman` uses simple commands to manage secrets. Secret values are passed via `stdin`.
+### Storing and Managing Secrets
 
-### Commands
+All secret names are automatically converted to `snake_case`.
 
-**1. Add a Secret**
+- **Add a secret:**
+  ```sh
+  # The value is read from standard input
+  echo "your-secret-value" | gman add my_api_key
+  ```
+  or don't provide a value to add the secret interactively:
+  ```shell
+  gman add my_api_key
+  ```
 
-To add a new secret, use the `add` command. You will be prompted to enter the secret value, followed by `Ctrl-D` to save.
+- **Retrieve a secret:**
+  ```sh
+  gman get my_api_key
+  ```
 
-```sh
-gman add my_api_key
-```
-```
-Enter the text to encrypt, then press Ctrl-D twice to finish input
-this-is-my-secret-api-key
-^D
-✓ Secret 'my_api_key' added to the vault.
-```
+- **Update a secret:**
+  ```sh
+  echo "new-secret-value" | gman update my_api_key
+  ```
+  or don't provide a value to update the secret interactively:
+  ```shell
+  gman add my_api_key
+  ```
 
-You can also pipe the value directly:
-```sh
-echo "this-is-my-secret-api-key" | gman add my_api_key
-```
+- **List all secret names:**
+  ```sh
+  gman list
+  ```
 
-**2. Get a Secret**
+- **Delete a secret:**
+  ```sh
+  gman delete my_api_key
+  ```
 
-Retrieve a secret's plaintext value with the `get` command.
+- **Synchronize with remote secret storage (specific to the configured `provider`):**
+  ```sh
+  gman sync
+  ```
 
-```sh
-gman get my_api_key
-```
-```
-this-is-my-secret-api-key
-```
+### Running Commands
 
-**3. Get a Secret as JSON**
+- **Using a default profile:**
+  ```sh
+  # If an 'aws' profile exists, secrets are injected.
+  gman aws sts get-caller-identity
+  ```
 
-Use the `--output json` flag to get the secret in a structured format.
+- **Specifying a profile:**
+  ```sh
+  # Manually specify which profile to use with --profile
+  gman --profile my-docker-profile docker run my-app
+  ```
 
-```sh
-gman get my_api_key --output json
-```
-```
-{
-  "my_api_key": "this-is-my-secret-api-key"
-}
-```
-
-**4. List Secrets**
-
-List the names of all secrets in the vault.
-
-```sh
-gman list
-```
-```
-Secrets in the vault:
-- my_api_key
-- another_secret
-```
-
-**5. Update a Secret**
-
-Update an existing secret's value.
-
-```sh
-echo "new-secret-value" | gman update my_api_key
-```
-```
-✓ Secret 'my_api_key' updated in the vault.
-```
-
-**6. Delete a Secret**
-
-Remove a secret from the vault.
-
-```sh
-gman delete my_api_key
-```
-```
-✓ Secret 'my_api_key' deleted from the vault.
-```
-
-**7. Generate Shell Completions**
-
-Create a completion script for your shell to enable auto-complete for commands and arguments.
-
-```sh
-# For Bash
-gman completions bash > /etc/bash_completion.d/gman
-
-# For Zsh
-gman completions zsh > /usr/local/share/zsh/site-functions/_gman
-```
+- **Dry Run:**
+  ```sh
+  # See what command would be executed without running it.
+  gman --dry-run aws s3 ls
+  # Output will show: aws -e AWS_ACCESS_KEY_ID=***** ... s3 ls
+  ```
 
 ## Creator
 * [Alex Clarke](https://github.com/Dark-Alex-17)

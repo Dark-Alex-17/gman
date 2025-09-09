@@ -57,7 +57,6 @@ pub struct Config {
     pub provider: SupportedProvider,
     pub password_file: Option<PathBuf>,
     pub git_branch: Option<String>,
-    /// The git remote URL to push changes to (e.g. git@github.com:user/repo.git)
     pub git_remote_url: Option<String>,
     pub git_user_name: Option<String>,
     #[validate(email)]
