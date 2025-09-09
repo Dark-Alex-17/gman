@@ -3,8 +3,8 @@ name = "gman"
 version = "0.1.0"
 edition = "2024"
 authors = ["Alex Clarke <alex.j.tusa@gmail.com>"]
-description = "Universal credential management CLI"
-keywords = ["cli", "secrets", "credentials", "passwords"]
+description = "Universal secret management and command injection tool"
+keywords = ["cli", "secrets", "credentials", "command-line", "encryption"]
 documentation = "https://github.com/Dark-Alex-17/gman"
 repository = "https://github.com/Dark-Alex-17/gman"
 homepage = "https://github.com/Dark-Alex-17/gman"
@@ -39,9 +39,6 @@ serde_json = "1.0.143"
 dialoguer = "0.12.0"
 chrono = "0.4.42"
 indoc = "2.0.6"
-
-[dev-dependencies]
-mockall = "0.12.1"
 
 [[bin]]
 bench = false
