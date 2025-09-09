@@ -17,8 +17,12 @@ use chacha20poly1305::{
     Key, XChaCha20Poly1305, XNonce,
     aead::{Aead, KeyInit, OsRng},
 };
+use dialoguer::{theme, Input};
 use log::{debug, error};
 use serde::Deserialize;
+use theme::ColorfulTheme;
+use validator::Validate;
+use crate::providers::git_sync::{sync_and_push, SyncOpts};
 
 #[derive(Debug, Clone)]
 pub struct LocalProviderConfig {
@@ -36,7 +40,7 @@ impl Default for LocalProviderConfig {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
 pub struct LocalProvider;
 
 impl SecretProvider for LocalProvider {
@@ -110,6 +114,50 @@ impl SecretProvider for LocalProvider {
 
         Ok(keys)
     }
+
+	fn sync(&self, config: &mut Config) -> Result<()> {
+		let mut config_changed = false;
+
+		if config.git_branch.is_none() {
+			config_changed = true;
+			debug!("Prompting user to set git_branch in config for sync");
+			let branch: String = Input::with_theme(&ColorfulTheme::default())
+				.with_prompt("Enter git branch to sync with")
+				.default("main".into())
+				.interact_text()?;
+
+			config.git_branch = Some(branch);
+		}
+
+		if config.git_remote_url.is_none() {
+			config_changed = true;
+			debug!("Prompting user to set git_remote in config for sync");
+			let remote: String = Input::with_theme(&ColorfulTheme::default())
+				.with_prompt("Enter remote git URL to sync with")
+				.validate_with(|s: &String| {
+					Config { git_remote_url: Some(s.clone()), ..Config::default() }.validate().map(|_| ())
+						.map_err(|e| e.to_string())
+				})
+				.interact_text()?;
+
+			config.git_remote_url = Some(remote);
+		}
+
+		if config_changed {
+			debug!("Saving updated config");
+			confy::store("gman", "config", &config).with_context(|| "failed to save updated config")?;
+		}
+
+		let sync_opts = SyncOpts {
+			remote_url: &config.git_remote_url,
+			branch: &config.git_branch,
+			user_name: &config.git_user_name,
+			user_email: &config.git_user_email,
+			git_executable: &config.git_executable
+		};
+
+		sync_and_push(&sync_opts)
+	}
 }
 
 fn encrypt_string(password: &SecretString, plaintext: &str) -> Result<String> {

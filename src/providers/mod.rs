@@ -1,4 +1,5 @@
 pub mod local;
+mod git_sync;
 
 use crate::config::Config;
 use crate::providers::local::LocalProvider;
@@ -14,7 +15,7 @@ pub trait SecretProvider {
     fn update_secret(&self, config: &Config, key: &str, value: &str) -> Result<()>;
     fn delete_secret(&self, key: &str) -> Result<()>;
     fn list_secrets(&self) -> Result<Vec<String>>;
-    // fn sync(&self, config: &config) -> Result<()>;
+    fn sync(&self, config: &mut Config) -> Result<()>;
 }
 
 #[derive(Debug, Error)]
@@ -23,7 +24,7 @@ pub enum ParseProviderError {
     Unsupported(String),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize)]
 pub enum SupportedProvider {
     Local(LocalProvider),
 }

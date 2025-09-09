@@ -13,6 +13,7 @@ use heck::ToSnakeCase;
 use std::io::{self, IsTerminal, Read, Write};
 use std::panic;
 use std::panic::PanicHookInfo;
+use validator::Validate;
 
 mod utils;
 
@@ -89,8 +90,12 @@ enum Commands {
         name: String,
     },
 
-    /// List all secrets stored in the configured secret provider
+    /// List all secrets stored in the configured secret provider (if supported by the provider)
+		/// If a provider does not support listing secrets, this command will return an error.
     List {},
+
+    /// Sync secrets with remote storage (if supported by the provider)
+    Sync {},
 
     /// Generate shell completion scripts
     Completions {
@@ -106,7 +111,7 @@ fn main() -> Result<()> {
         panic_hook(info);
     }));
     let cli = Cli::parse();
-    let config = load_config(&cli)?;
+    let mut config = load_config(&cli)?;
     let secrets_provider = config.extract_provider();
 
     match cli.command {
@@ -179,19 +184,21 @@ fn main() -> Result<()> {
                         println!("{}", serde_json::to_string_pretty(&json_output)?);
                         return Ok(());
                     }
-                    Some(OutputFormat::Text) => {
+                    Some(OutputFormat::Text) | None => {
                         for key in &secrets {
-                            println!("- {}", key);
-                        }
-                    }
-                    None => {
-                        println!("Secrets in the vault:");
-                        for key in &secrets {
-                            println!("- {}", key);
+                            println!("{}", key);
                         }
                     }
                 }
             }
+        }
+        Commands::Sync {} => {
+            secrets_provider
+                .sync(&mut config)
+                .map(|_| match cli.output {
+                    None => println!("✓ Secrets synchronized with remote"),
+                    Some(_) => (),
+                })?;
         }
         Commands::Completions { shell } => {
             let mut cmd = Cli::command();
@@ -205,6 +212,7 @@ fn main() -> Result<()> {
 
 fn load_config(cli: &Cli) -> Result<Config> {
     let mut config: Config = confy::load("gman", "config")?;
+    config.validate()?;
     if let Some(local_password_file) = Config::local_provider_password_file() {
         config.password_file = Some(local_password_file);
     }
