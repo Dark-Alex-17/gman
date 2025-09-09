@@ -10,6 +10,7 @@ use std::str::FromStr;
 use thiserror::Error;
 
 pub trait SecretProvider {
+	  fn name(&self) -> &'static str;
     fn get_secret(&self, config: &Config, key: &str) -> Result<String>;
     fn set_secret(&self, config: &Config, key: &str, value: &str) -> Result<()>;
     fn update_secret(&self, config: &Config, key: &str, value: &str) -> Result<()>;
@@ -24,7 +25,7 @@ pub enum ParseProviderError {
     Unsupported(String),
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Eq, PartialEq)]
 pub enum SupportedProvider {
     Local(LocalProvider),
 }
