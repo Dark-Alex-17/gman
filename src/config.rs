@@ -7,7 +7,7 @@ use std::borrow::Cow;
 use std::path::PathBuf;
 use validator::{Validate, ValidationError};
 
-#[derive(Debug, Clone, Validate, Serialize, Deserialize)]
+#[derive(Debug, Clone, Validate, Serialize, Deserialize, PartialEq, Eq)]
 #[validate(schema(function = "flags_or_none", skip_on_field_errors = false))]
 pub struct RunConfig {
     #[validate(required)]
@@ -51,7 +51,7 @@ fn flags_or_none(run_config: &RunConfig) -> Result<(), ValidationError> {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Validate, Serialize, Deserialize)]
+#[derive(Debug, Clone, Validate, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Config {
     #[serde_as(as = "DisplayFromStr")]
     pub provider: SupportedProvider,

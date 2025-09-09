@@ -40,9 +40,20 @@ dialoguer = "0.12.0"
 chrono = "0.4.42"
 indoc = "2.0.6"
 
+[dev-dependencies]
+mockall = "0.12.1"
+
 [[bin]]
 bench = false
 name = "gman"
+
+[[test]]
+name = "mod_tests"
+path = "tests/providers/mod_tests.rs"
+
+[[test]]
+name = "local_tests"
+path = "tests/providers/local_tests.rs"
 
 [profile.release]
 lto = true
