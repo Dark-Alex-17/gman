@@ -14,7 +14,7 @@ pub fn preview_command(cmd: &Command) -> String {
 					sh_escape(k),
 					sh_escape(v),
 				)),
-				None => parts.push(format!("unset {}", sh_escape(k))), // env removed
+				None => parts.push(format!("unset {}", sh_escape(k))),
 			}
 		}
 
@@ -27,13 +27,11 @@ pub fn preview_command(cmd: &Command) -> String {
 	{
 		let mut parts: Vec<String> = Vec::new();
 
-		// On Windows, emulate `cmd.exe` style env setting
-		// (This is for display; Command doesn’t invoke cmd.exe.)
 		let mut env_bits = Vec::new();
 		for (k, vopt) in cmd.get_envs() {
 			match vopt {
 				Some(v) => env_bits.push(format!("set {}={}", ps_quote(k), ps_quote(v))),
-				None => env_bits.push(format!("set {}=", ps_quote(k))), // unset
+				None => env_bits.push(format!("set {}=", ps_quote(k))),
 			}
 		}
 		if !env_bits.is_empty() {
@@ -41,7 +39,6 @@ pub fn preview_command(cmd: &Command) -> String {
 			parts.push("&&".to_owned());
 		}
 
-		// Program + args (quote per CreateProcess rules)
 		parts.push(win_quote(cmd.get_program()));
 		parts.extend(cmd.get_args().map(win_quote));
 		parts.join(" ")
@@ -70,8 +67,6 @@ fn sh_escape(s: &OsStr) -> Cow<'_, str> {
 
 #[cfg(windows)]
 fn win_quote(s: &OsStr) -> String {
-	// Quote per Windows argv rules (CreateProcess / CommandLineToArgvW).
-	// Wrap in "..." and escape internal " with backslashes.
 	let s = s.to_string_lossy();
 	if !s.contains([' ', '\t', '"', '\\']) {
 		return s.into_owned();
@@ -98,8 +93,6 @@ fn win_quote(s: &OsStr) -> String {
 	out
 }
 
-// For displaying env names/values in the "set name=value" bits.
-// Single-quote for PowerShell-like readability; fine for display purposes.
 #[cfg(windows)]
 fn ps_quote(s: &OsStr) -> String {
 	let s = s.to_string_lossy();
