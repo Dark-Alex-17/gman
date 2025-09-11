@@ -3,6 +3,7 @@ mod tests {
     use gman::config::{Config, RunConfig};
     use gman::providers::SupportedProvider;
     use gman::providers::local::LocalProvider;
+    use pretty_assertions::{assert_eq, assert_str_eq};
 
     use validator::Validate;
 
@@ -190,7 +191,7 @@ mod tests {
     fn test_config_extract_provider() {
         let config = Config::default();
         let provider = config.extract_provider();
-        assert_eq!(provider.name(), "LocalProvider");
+        assert_str_eq!(provider.name(), "LocalProvider");
     }
 
     #[test]

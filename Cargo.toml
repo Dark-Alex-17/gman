@@ -3,7 +3,7 @@ name = "gman"
 version = "0.1.0"
 edition = "2024"
 authors = ["Alex Clarke <alex.j.tusa@gmail.com>"]
-description = "Universal secret management and command injection tool"
+description = "Universal secret management and injection tool"
 keywords = ["cli", "secrets", "credentials", "command-line", "encryption"]
 documentation = "https://github.com/Dark-Alex-17/gman"
 repository = "https://github.com/Dark-Alex-17/gman"
@@ -41,19 +41,19 @@ chrono = "0.4.42"
 indoc = "2.0.6"
 regex = "1.11.2"
 
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+tempfile = "3.10.1"
+
 [[bin]]
 bench = false
 name = "gman"
-
-[[test]]
-name = "mod_tests"
-path = "tests/providers/mod_tests.rs"
-
-[[test]]
-name = "local_tests"
-path = "tests/providers/local_tests.rs"
 
 [profile.release]
 lto = true
 strip = true
 opt-level = "z"
+
+[[test]]
+name = "integration"
+path = "tests/tests.rs"

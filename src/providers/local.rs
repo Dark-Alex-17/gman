@@ -330,3 +330,27 @@ fn get_password(config: &Config) -> Result<SecretString> {
         Ok(SecretString::new(password.into()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::derive_key;
+    use crate::providers::local::derive_key_with_params;
+    use pretty_assertions::assert_eq;
+    use secrecy::SecretString;
+
+    #[test]
+    fn test_derive_key() {
+        let password = SecretString::new("test_password".to_string().into());
+        let salt = [0u8; 16];
+        let key = derive_key(&password, &salt).unwrap();
+        assert_eq!(key.as_slice().len(), 32);
+    }
+
+    #[test]
+    fn test_derive_key_with_params() {
+        let password = SecretString::new("test_password".to_string().into());
+        let salt = [0u8; 16];
+        let key = derive_key_with_params(&password, &salt, 10, 1, 1).unwrap();
+        assert_eq!(key.as_slice().len(), 32);
+    }
+}

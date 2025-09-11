@@ -157,6 +157,7 @@ pub fn decrypt_string(password: impl Into<SecretString>, envelope: &str) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn round_trip() {

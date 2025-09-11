@@ -102,3 +102,23 @@ fn ps_quote(s: &OsStr) -> String {
         s.into_owned()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::command::preview_command;
+    use pretty_assertions::assert_str_eq;
+    use std::process::Command;
+
+    #[test]
+    fn test_preview_command() {
+        let mut cmd = Command::new("echo");
+        cmd.arg("hello world");
+        cmd.env("MY_VAR", "my_value");
+        let preview = preview_command(&cmd);
+        if cfg!(unix) {
+            assert_str_eq!(preview, "MY_VAR=my_value echo 'hello world'");
+        } else if cfg!(windows) {
+            assert_str_eq!(preview, "set MY_VAR=my_value && \"echo\" \"hello world\"");
+        }
+    }
+}

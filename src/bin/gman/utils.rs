@@ -41,3 +41,20 @@ pub fn get_log_path() -> PathBuf {
     log_path.push("gman.log");
     log_path
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::utils::get_log_path;
+
+    #[test]
+    fn test_get_log_path() {
+        let log_path = get_log_path();
+        if cfg!(target_os = "linux") {
+            assert!(log_path.ends_with(".cache/gman/gman.log"));
+        } else if cfg!(target_os = "macos") {
+            assert!(log_path.ends_with("Library/Logs/gman/gman.log"));
+        } else if cfg!(target_os = "windows") {
+            assert!(log_path.ends_with("Logs\\gman\\gman.log"));
+        }
+    }
+}
