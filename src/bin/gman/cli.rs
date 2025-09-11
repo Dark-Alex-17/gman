@@ -1,6 +1,6 @@
 use crate::command::preview_command;
-use anyhow::{Context, Result, anyhow};
-use gman::config::{Config, RunConfig};
+use anyhow::{anyhow, Context, Result};
+use gman::config::{Config, ProviderConfig, RunConfig};
 use gman::providers::SecretProvider;
 use heck::ToSnakeCase;
 use log::{debug, error};
@@ -13,9 +13,11 @@ use std::process::Command;
 
 const ARG_FORMAT_PLACEHOLDER_KEY: &str = "{{key}}";
 const ARG_FORMAT_PLACEHOLDER_VALUE: &str = "{{value}}";
+
 pub fn wrap_and_run_command(
     secrets_provider: Box<dyn SecretProvider>,
     config: &Config,
+		provider_config: &ProviderConfig,
     tokens: Vec<OsString>,
     profile_name: Option<String>,
     dry_run: bool,
@@ -30,15 +32,17 @@ pub fn wrap_and_run_command(
             .ok_or_else(|| anyhow!("failed to convert program name to string"))?
     };
     let run_config_opt = config.run_configs.as_ref().and_then(|configs| {
-        configs.iter().filter(|c| c.name.is_some()).find(|c| {
-            c.name.as_ref().expect("failed to unwrap run config name") == run_config_profile_name
-        })
+        configs
+            .iter()
+            .find(|c| c.name.as_deref() == Some(run_config_profile_name))
     });
     if let Some(run_cfg) = run_config_opt {
         let secrets_result = run_cfg
             .secrets
             .as_ref()
-            .expect("no secrets configured for run profile")
+            .ok_or_else(|| {
+                anyhow!("No secrets configured for run profile '{run_config_profile_name}'")
+            })?
             .iter()
             .map(|key| {
                 let secret_name = key.to_snake_case().to_uppercase();
@@ -47,7 +51,7 @@ pub fn wrap_and_run_command(
                     run_config_profile_name
                 );
                 secrets_provider
-                    .get_secret(config, key.to_snake_case().to_uppercase().as_str())
+                    .get_secret(provider_config, key.to_snake_case().to_uppercase().as_str())
                     .ok()
                     .map_or_else(
                         || {
@@ -157,6 +161,7 @@ pub fn wrap_and_run_command(
     }
     Ok(())
 }
+
 fn generate_files_secret_injections(
     secrets: HashMap<String, String>,
     run_config: &RunConfig,
@@ -189,22 +194,24 @@ fn generate_files_secret_injections(
     }
     Ok(results)
 }
+
 pub fn run_cmd(cmd: &mut Command, dry_run: bool) -> Result<()> {
     if dry_run {
-        eprintln!("Command to be executed: {}", preview_command(cmd));
+        println!("Command to be executed: {}", preview_command(cmd));
     } else {
         cmd.status()
             .with_context(|| format!("failed to execute command '{:?}'", cmd))?;
     }
     Ok(())
 }
+
 pub fn parse_args(
     args: &[OsString],
     run_config: &RunConfig,
     secrets: HashMap<String, String>,
     dry_run: bool,
 ) -> Result<Vec<OsString>> {
-    let args = args.to_vec();
+    let mut args = args.to_vec();
     let flag = run_config
         .flag
         .as_ref()
@@ -216,7 +223,6 @@ pub fn parse_args(
         .arg_format
         .as_ref()
         .ok_or_else(|| anyhow!("arg_format must be set if flag is set"))?;
-    let mut args = args.to_vec();
     if flag_position > args.len() {
         secrets.iter().for_each(|(k, v)| {
             let v = if dry_run { "*****" } else { v };
@@ -246,10 +252,31 @@ pub fn parse_args(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::cli::generate_files_secret_injections;
-    use gman::config::RunConfig;
+    use gman::config::{Config, ProviderConfig, RunConfig};
     use pretty_assertions::{assert_eq, assert_str_eq};
     use std::collections::HashMap;
+    use std::ffi::OsString;
+
+    struct DummyProvider;
+    impl SecretProvider for DummyProvider {
+        fn name(&self) -> &'static str {
+            "Dummy"
+        }
+        fn get_secret(&self, _config: &ProviderConfig, key: &str) -> Result<String> {
+            Ok(format!("{}_VAL", key))
+        }
+        fn set_secret(&self, _config: &ProviderConfig, _key: &str, _value: &str) -> Result<()> {
+            Ok(())
+        }
+        fn delete_secret(&self, _key: &str) -> Result<()> {
+            Ok(())
+        }
+        fn sync(&self, _config: &mut ProviderConfig) -> Result<()> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn test_generate_files_secret_injections() {
@@ -257,7 +284,7 @@ mod tests {
         secrets.insert("SECRET1".to_string(), "value1".to_string());
         let temp_dir = tempfile::tempdir().unwrap();
         let file_path = temp_dir.path().join("test.txt");
-        std::fs::write(&file_path, "{{secret1}}").unwrap();
+        fs::write(&file_path, "{{secret1}}").unwrap();
 
         let run_config = RunConfig {
             name: Some("test".to_string()),
@@ -274,5 +301,80 @@ mod tests {
         assert_eq!(result[0].0, &file_path);
         assert_str_eq!(result[0].1, "{{secret1}}");
         assert_str_eq!(result[0].2, "value1");
+    }
+
+    #[test]
+    fn test_parse_args_insert_and_append() {
+        let run_config = RunConfig {
+            name: Some("docker".into()),
+            secrets: Some(vec!["api_key".into()]),
+            files: None,
+            flag: Some("-e".into()),
+            flag_position: Some(1),
+            arg_format: Some("{{key}}={{value}}".into()),
+        };
+        let mut secrets = HashMap::new();
+        secrets.insert("API_KEY".into(), "xyz".into());
+
+        // Insert at position
+        let args = vec![OsString::from("run"), OsString::from("image")];
+        let out = parse_args(&args, &run_config, secrets.clone(), true).unwrap();
+        assert_eq!(
+            out,
+            vec!["run", "-e", "API_KEY=*****", "image"]
+                .into_iter()
+                .map(OsString::from)
+                .collect::<Vec<_>>()
+        );
+
+        // Append when position beyond len
+        let run_config2 = RunConfig {
+            flag_position: Some(99),
+            ..run_config.clone()
+        };
+        let out2 = parse_args(&args, &run_config2, secrets, true).unwrap();
+        assert_eq!(
+            out2,
+            vec!["run", "image", "-e", "API_KEY=*****"]
+                .into_iter()
+                .map(OsString::from)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_wrap_and_run_command_no_profile() {
+        let cfg = Config::default();
+			let provider_cfg = ProviderConfig::default();
+        let prov: Box<dyn SecretProvider> = Box::new(DummyProvider);
+        let tokens = vec![OsString::from("echo"), OsString::from("hi")];
+        let err = wrap_and_run_command(prov, &cfg, &provider_cfg, tokens, None, true).unwrap_err();
+        assert!(err.to_string().contains("No run profile found"));
+    }
+
+    #[test]
+    fn test_wrap_and_run_command_env_injection_dry_run() {
+        // Create a config with a matching run profile for command "echo"
+        let run_cfg = RunConfig {
+            name: Some("echo".into()),
+            secrets: Some(vec!["api_key".into()]),
+            files: None,
+            flag: None,
+            flag_position: None,
+            arg_format: None,
+        };
+        let cfg = Config {
+            run_configs: Some(vec![run_cfg]),
+            ..Config::default()
+        };
+			let provider_cfg = ProviderConfig::default();
+        let prov: Box<dyn SecretProvider> = Box::new(DummyProvider);
+
+        // Capture stderr for dry_run preview
+        let tokens = vec![OsString::from("echo"), OsString::from("hello")];
+        // Best-effort: ensure function does not error under dry_run
+        let res = wrap_and_run_command(prov, &cfg, &provider_cfg, tokens, None, true);
+        assert!(res.is_ok());
+        // Not asserting output text to keep test platform-agnostic
     }
 }

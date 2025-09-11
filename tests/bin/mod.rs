@@ -1,1 +1,1 @@
-mod gman;
+mod cli_tests;

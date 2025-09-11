@@ -66,9 +66,15 @@ pub fn sync_and_push(opts: &SyncOpts<'_>) -> Result<()> {
     checkout_branch(&git, &repo_dir, branch)?;
     set_origin(&git, &repo_dir, remote_url)?;
 
-    stage_all(&git, &repo_dir)?;
-
+    // Always align local with remote before staging/committing. For a fresh
+    // repo where the remote already has content, we intentionally discard any
+    // local working tree changes and take the remote state to avoid merge
+    // conflicts on first sync.
     fetch_and_pull(&git, &repo_dir, branch)?;
+
+    // Stage and commit any subsequent local changes after aligning with remote
+    // so we don't merge uncommitted local state.
+    stage_all(&git, &repo_dir)?;
 
     commit_now(&git, &repo_dir, &commit_message)?;
 
@@ -228,15 +234,49 @@ fn stage_all(git: &Path, repo: &Path) -> Result<()> {
 }
 
 fn fetch_and_pull(git: &Path, repo: &Path, branch: &str) -> Result<()> {
-    run_git(git, repo, &["fetch", "origin", branch])
+    // Fetch all refs from origin (safe even if branch doesn't exist remotely)
+    run_git(git, repo, &["fetch", "origin", "--prune"]) 
         .with_context(|| "Failed to fetch changes from remote")?;
-    run_git(
-        git,
-        repo,
-        &["merge", "--ff-only", &format!("origin/{branch}")],
-    )
-    .with_context(|| "Failed to merge remote changes")?;
+
+    let origin_ref = format!("origin/{branch}");
+    let remote_has_branch = has_remote_branch(git, repo, branch);
+
+    // If the repo has no commits yet, prefer remote state and discard local
+    // if the remote branch exists. Otherwise, keep local state and allow an
+    // initial commit to be created and pushed.
+    if !has_head(git, repo) {
+        if remote_has_branch {
+            run_git(git, repo, &["checkout", "-f", "-B", branch, &origin_ref])
+                .with_context(|| "Failed to checkout remote branch over local state")?;
+            run_git(git, repo, &["reset", "--hard", &origin_ref])
+                .with_context(|| "Failed to hard reset to remote branch")?;
+            run_git(git, repo, &["clean", "-fd"]).with_context(|| "Failed to clean untracked files")?;
+        }
+        return Ok(());
+    }
+
+    // If we have local history and the remote branch exists, fast-forward.
+    if remote_has_branch {
+        run_git(
+            git,
+            repo,
+            &["merge", "--ff-only", &origin_ref],
+        )
+        .with_context(|| "Failed to merge remote changes")?;
+    }
     Ok(())
+}
+
+fn has_remote_branch(git: &Path, repo: &Path, branch: &str) -> bool {
+    Command::new(git)
+        .arg("-C")
+        .arg(repo)
+        .args(["show-ref", "--verify", "--quiet", &format!("refs/remotes/origin/{}", branch)])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 fn has_head(git: &Path, repo: &Path) -> bool {
@@ -279,4 +319,55 @@ fn commit_now(git: &Path, repo: &Path, msg: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sync_opts_validation_ok() {
+        let remote = Some("git@github.com:user/repo.git".to_string());
+        let branch = Some("main".to_string());
+        let opts = SyncOpts {
+            remote_url: &remote,
+            branch: &branch,
+            user_name: &None,
+            user_email: &None,
+            git_executable: &None,
+        };
+        assert!(opts.validate().is_ok());
+    }
+
+    #[test]
+    fn sync_opts_validation_missing_fields() {
+        let remote = None;
+        let branch = None;
+        let opts = SyncOpts {
+            remote_url: &remote,
+            branch: &branch,
+            user_name: &None,
+            user_email: &None,
+            git_executable: &None,
+        };
+        assert!(opts.validate().is_err());
+    }
+
+    #[test]
+    fn resolve_git_prefers_override_and_env() {
+        // Override path wins
+        let override_path = Some(PathBuf::from("/custom/git"));
+        let got = resolve_git(override_path.as_ref()).unwrap();
+        assert_eq!(got, PathBuf::from("/custom/git"));
+
+        // If no override, env var is used
+        unsafe {
+            env::set_var("GIT_EXECUTABLE", "/env/git");
+        }
+        let got_env = resolve_git(None).unwrap();
+        assert_eq!(got_env, PathBuf::from("/env/git"));
+        unsafe {
+            env::remove_var("GIT_EXECUTABLE");
+        }
+    }
 }

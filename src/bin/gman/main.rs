@@ -1,22 +1,19 @@
 use clap::{
-    CommandFactory, Parser, ValueEnum, crate_authors, crate_description, crate_name, crate_version,
+    crate_authors, crate_description, crate_name, crate_version, CommandFactory, Parser, ValueEnum,
 };
 use std::ffi::OsString;
 
 use anyhow::{Context, Result};
 use clap::Subcommand;
 use crossterm::execute;
-use crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
-use gman::config::Config;
-use gman::providers::SupportedProvider;
-use gman::providers::local::LocalProvider;
+use crossterm::terminal::{disable_raw_mode, LeaveAlternateScreen};
+use gman::config::load_config;
 use heck::ToSnakeCase;
 use std::io::{self, IsTerminal, Read, Write};
 use std::panic::PanicHookInfo;
 
 use crate::cli::wrap_and_run_command;
 use std::panic;
-use validator::Validate;
 
 mod cli;
 mod command;
@@ -26,20 +23,6 @@ mod utils;
 enum OutputFormat {
     Text,
     Json,
-}
-
-#[derive(Debug, Clone, ValueEnum)]
-#[clap(rename_all = "lower")]
-pub enum ProviderKind {
-    Local,
-}
-
-impl From<ProviderKind> for SupportedProvider {
-    fn from(k: ProviderKind) -> Self {
-        match k {
-            ProviderKind::Local => SupportedProvider::Local(LocalProvider),
-        }
-    }
 }
 
 #[derive(Debug, Parser)]
@@ -61,9 +44,9 @@ struct Cli {
     #[arg(short, long, value_enum)]
     output: Option<OutputFormat>,
 
-    /// Specify the secret provider to use (defaults to 'provider' in config or 'local')
+    /// Specify the secret provider to use (defaults to 'default_provider' in config (usually 'local'))
     #[arg(long, value_enum)]
-    provider: Option<ProviderKind>,
+    provider: Option<String>,
 
     /// Specify a run profile to use when wrapping a command
     #[arg(long, short)]
@@ -130,8 +113,9 @@ fn main() -> Result<()> {
         panic_hook(info);
     }));
     let cli = Cli::parse();
-    let mut config = load_config(&cli)?;
-    let secrets_provider = config.extract_provider();
+    let config = load_config()?;
+    let mut provider_config = config.extract_provider_config(cli.provider.clone())?;
+    let secrets_provider = provider_config.extract_provider();
 
     match cli.command {
         Commands::Add { name } => {
@@ -139,7 +123,7 @@ fn main() -> Result<()> {
                 read_all_stdin().with_context(|| "unable to read plaintext from stdin")?;
             let snake_case_name = name.to_snake_case().to_uppercase();
             secrets_provider
-                .set_secret(&config, &snake_case_name, plaintext.trim_end())
+                .set_secret(&provider_config, &snake_case_name, plaintext.trim_end())
                 .map(|_| match cli.output {
                     Some(_) => (),
                     None => println!("✓ Secret '{snake_case_name}' added to the vault."),
@@ -148,7 +132,7 @@ fn main() -> Result<()> {
         Commands::Get { name } => {
             let snake_case_name = name.to_snake_case().to_uppercase();
             secrets_provider
-                .get_secret(&config, &snake_case_name)
+                .get_secret(&provider_config, &snake_case_name)
                 .map(|secret| match cli.output {
                     Some(OutputFormat::Json) => {
                         let json_output = serde_json::json!({
@@ -170,7 +154,7 @@ fn main() -> Result<()> {
                 read_all_stdin().with_context(|| "unable to read plaintext from stdin")?;
             let snake_case_name = name.to_snake_case().to_uppercase();
             secrets_provider
-                .update_secret(&config, &snake_case_name, plaintext.trim_end())
+                .update_secret(&provider_config, &snake_case_name, plaintext.trim_end())
                 .map(|_| match cli.output {
                     Some(_) => (),
                     None => println!("✓ Secret '{snake_case_name}' updated in the vault."),
@@ -211,14 +195,21 @@ fn main() -> Result<()> {
             }
         }
         Commands::Sync {} => {
-            secrets_provider.sync(&mut config).map(|_| {
+            secrets_provider.sync(&mut provider_config).map(|_| {
                 if cli.output.is_none() {
                     println!("✓ Secrets synchronized with remote")
                 }
             })?;
         }
         Commands::External(tokens) => {
-            wrap_and_run_command(secrets_provider, &config, tokens, cli.profile, cli.dry_run)?;
+            wrap_and_run_command(
+                secrets_provider,
+                &config,
+                &provider_config,
+                tokens,
+                cli.profile,
+                cli.dry_run,
+            )?;
         }
         Commands::Completions { shell } => {
             let mut cmd = Cli::command();
@@ -228,21 +219,6 @@ fn main() -> Result<()> {
     }
 
     Ok(())
-}
-
-fn load_config(cli: &Cli) -> Result<Config> {
-    let mut config: Config = confy::load("gman", "config")?;
-    config.validate()?;
-    if let Some(local_password_file) = Config::local_provider_password_file() {
-        config.password_file = Some(local_password_file);
-    }
-
-    if let Some(provider_kind) = &cli.provider {
-        let provider: SupportedProvider = provider_kind.clone().into();
-        config.provider = provider;
-    }
-
-    Ok(config)
 }
 
 fn read_all_stdin() -> Result<String> {

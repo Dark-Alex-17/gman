@@ -1,30 +1,25 @@
 # gman - Universal Credential Manager
 
-`gman` is a command-line tool designed to streamline credential and secret management for your scripts, automations, and 
-applications. It provides a single, secure interface to store, retrieve, and inject secrets, eliminating the need to 
-juggle different methods like configuration files or environment variables for each tool.
+`gman` is a command-line tool for managing and injecting secrets for your scripts, automations, and applications.
+It provides a single, secure interface to store, retrieve, and inject secrets so you can stop hand-rolling config
+files or sprinkling environment variables everywhere.
 
 ## Overview
 
-The core philosophy of `gman` is to act as a universal wrapper for any command that requires credentials. You can store 
-your secrets—like API tokens, passwords, or certificates—in an encrypted vault backed by various providers. Then, you 
-can either fetch them directly or, more powerfully, execute commands through `gman`, which securely injects the 
-necessary secrets as environment variables or command-line flags.
+`gman` acts as a universal wrapper for any command that needs credentials. Store your secrets—API tokens, passwords,
+certs—with a provider, then either fetch them directly or run your command through `gman` to inject what it needs as
+environment variables, flags, or file content.
 
 ## Features
 
-- **Secure, Encrypted Storage**: All secrets are stored in an encrypted state using strong cryptography.
-- **Pluggable Providers**: Supports different backends for secret storage. The default is a local file-based system.
-- **Git Synchronization**: The `local` provider can synchronize your encrypted secrets across multiple systems using a 
-  private Git repository.
-- **Seamless Command Wrapping**: Run any command through `gman` to automatically provide it with the secrets it needs 
-  (e.g., `gman aws s3 ls`).
-- **Customizable Run Profiles**: Define how secrets are passed to commands, either as environment variables (default) or 
-  as specific command-line flags.
-- **Secret Name Standardization**: Enforces `snake_case` for all secret names to ensure consistency.
-- **Direct Secret Access**: Retrieve plaintext secrets directly when needed (e.g., `gman get my_api_key`).
-- **Dry Run Mode**: Preview the command and the secrets that will be injected without actually executing it using the 
-  `--dry-run` flag.
+- Secure encryption for stored secrets
+- Pluggable providers (local by default; more can be added)
+- Git sync for local vaults to move secrets across machines
+- Command wrapping to inject secrets for any program
+- Customizable run profiles (env, flags, or files)
+- Consistent secret naming: input is snake_case; injected as UPPER_SNAKE_CASE
+- Direct retrieval via `gman get ...`
+- Dry-run to preview wrapped commands and secret injection
 
 ## Example Use Cases
 
@@ -68,7 +63,7 @@ cargo install --locked gman
 
 ## Configuration
 
-`gman` is configured via a YAML file located somewhere different for each OS:
+`gman` reads a YAML configuration file located at an OS-specific path:
 
 ### Linux
 ```
@@ -87,23 +82,30 @@ $HOME/Library/Application Support/gman/config.yml
 
 ### Default Configuration
 
+gman supports multiple providers. Select one as the default and then list provider configurations.
+
 ```yaml
 ---
-provider: local
-password_file: ~/.gman_password
+default_provider: local
+providers:
+  - name: local
+    provider: local
+    password_file: ~/.gman_password
+    # Optional Git sync settings for the 'local' provider
+    git_branch: main # Defaults to 'main'
+    git_remote_url: null # Set to enable Git sync (SSH or HTTPS)
+    git_user_name: null # Defaults to global git config user.name
+    git_user_email: null # Defaults to global git config user.email
+    git_executable: null # Defaults to 'git' in PATH
 
-# Optional Git sync settings for the 'local' provider
-git_branch: null # Defaults to 'main'
-git_remote_url: null # Required for Git sync
-git_user_name: null # Defaults to global git config user.name
-git_user_email: null # Defaults to global git config user.email
-git_executable: null # Defaults to 'git' in PATH
-run_configs: null # List of run configurations (profiles)
+# List of run configurations (profiles). See below.
+run_configs: []
 ```
 
 ## Providers
 `gman` supports multiple providers for secret storage. The default provider is `local`, which stores secrets in an 
-encrypted file on your filesystem. The following table shows the available and planned providers:
+encrypted file on your filesystem. The CLI and config format are designed to be extensible so new providers can be
+documented and added without breaking existing setups. The following table shows the available and planned providers:
 
 **Key:**
 
@@ -142,14 +144,21 @@ For use across multiple systems, `gman` can sync with a remote Git repository.
 **Important Notes for Git Sync:**
 - You **must** create the remote repository on your Git provider (e.g., GitHub) *before* attempting to sync.
 - The `git_remote_url` must be in SSH or HTTPS format (e.g., `git@github.com:your-user/your-repo.git`).
+- First sync behavior:
+  - If the remote already has content, `gman sync` adopts the remote state and discards uncommitted local changes in the
+    vault directory to avoid merge conflicts.
+  - If the remote is empty, `gman sync` initializes the repository locally, creates the first commit, and pushes.
 
 **Example `local` provider config for Git sync:**
 ```yaml
-provider: local
-git_branch: main
-git_remote_url: "git@github.com:my-user/gman-secrets.git"
-git_user_name: "Your Name"
-git_user_email: "your.email@example.com"
+default_provider: local
+providers:
+  - name: local
+    provider: local
+    git_branch: main
+    git_remote_url: "git@github.com:my-user/gman-secrets.git"
+    git_user_name: "Your Name"
+    git_user_email: "your.email@example.com"
 ```
 
 ## Run Configurations
@@ -157,9 +166,9 @@ git_user_email: "your.email@example.com"
 Run configurations (or "profiles") tell `gman` how to inject secrets into a command. Three modes of secret injection are
 supported:
 
-1. [**Environment Variables** (default)](#basic-run-config-environment-variables)
-2. [**Command-Line Flags**](#advanced-run-config-command-line-flags)
-3. [**Files**](#advanced-run-config-files)
+1. [**Environment Variables** (default)](#environment-variable-secret-injection)
+2. [**Command-Line Flags**](#inject-secrets-via-command-line-flags)
+3. [**Files**](#inject-secrets-into-files)
 
 When you wrap a command with `gman` and don't specify a specific run configuration via `--profile`, `gman` will look for 
 a profile with a `name` matching `<command>`. If found, it injects the specified secrets. If no profile is found, `gman` 
@@ -321,6 +330,49 @@ All secret names are automatically converted to `snake_case`.
   gman --dry-run aws s3 ls
   # Output will show: aws -e AWS_ACCESS_KEY_ID=***** ... s3 ls
   ```
+
+### Multiple Providers and Switching
+
+You can define multiple providers—even multiple of the same type—and switch between them per command.
+
+Example: two AWS Secrets Manager providers named `lab` and `prod`.
+
+```yaml
+default_provider: prod
+providers:
+  - name: lab
+    provider: aws_secrets_manager
+    # Additional provider-specific settings (e.g., region, role_arn, profile)
+    # region: us-east-1
+    # role_arn: arn:aws:iam::111111111111:role/lab-access
+
+  - name: prod
+    provider: aws_secrets_manager
+    # region: us-east-1
+    # role_arn: arn:aws:iam::222222222222:role/prod-access
+
+run_configs:
+  - name: aws
+    secrets:
+      - aws_access_key_id
+      - aws_secret_access_key
+```
+
+Switch providers on the fly using the provider name defined in `providers`:
+
+```sh
+# Use the default (prod)
+gman aws s3 ls
+
+# Explicitly use lab
+gman --provider lab aws s3 ls
+
+# Fetch a secret from prod
+gman get my_api_key
+
+# Fetch a secret from lab
+gman --provider lab get my_api_key
+```
 
 ## Creator
 * [Alex Clarke](https://github.com/Dark-Alex-17)

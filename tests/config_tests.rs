@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use gman::config::{Config, RunConfig};
+    use gman::config::{Config, ProviderConfig, RunConfig};
     use gman::providers::SupportedProvider;
     use gman::providers::local::LocalProvider;
-    use pretty_assertions::{assert_eq, assert_str_eq};
+    use pretty_assertions::assert_eq;
 
     use validator::Validate;
 
@@ -17,6 +17,7 @@ mod tests {
             arg_format: None,
             files: None,
         };
+
         assert!(run_config.validate().is_ok());
     }
 
@@ -30,6 +31,7 @@ mod tests {
             arg_format: None,
             files: None,
         };
+
         assert!(run_config.validate().is_err());
     }
 
@@ -43,6 +45,7 @@ mod tests {
             arg_format: None,
             files: None,
         };
+
         assert!(run_config.validate().is_err());
     }
 
@@ -56,6 +59,7 @@ mod tests {
             arg_format: Some("{{key}}={{value}}".to_string()),
             files: None,
         };
+
         assert!(run_config.validate().is_err());
     }
 
@@ -69,6 +73,7 @@ mod tests {
             arg_format: Some("{{key}}={{value}}".to_string()),
             files: None,
         };
+
         assert!(run_config.validate().is_ok());
     }
 
@@ -82,6 +87,7 @@ mod tests {
             arg_format: None,
             files: None,
         };
+
         assert!(run_config.validate().is_ok());
     }
 
@@ -95,6 +101,7 @@ mod tests {
             arg_format: None,
             files: None,
         };
+
         assert!(run_config.validate().is_err());
     }
 
@@ -108,6 +115,7 @@ mod tests {
             arg_format: Some("key=value".to_string()),
             files: None,
         };
+
         assert!(run_config.validate().is_err());
     }
 
@@ -121,6 +129,7 @@ mod tests {
             arg_format: None,
             files: None,
         };
+
         assert!(run_config.validate().is_ok());
     }
 
@@ -134,6 +143,7 @@ mod tests {
             arg_format: None,
             files: Some(Vec::new()),
         };
+
         assert!(run_config.validate().is_ok());
     }
 
@@ -147,12 +157,14 @@ mod tests {
             arg_format: Some("{{key}}={{value}}".to_string()),
             files: Some(Vec::new()),
         };
+
         assert!(run_config.validate().is_err());
     }
 
     #[test]
-    fn test_config_valid() {
-        let config = Config {
+    fn test_provider_config_valid() {
+        let config = ProviderConfig {
+            name: Some("local-test".to_string()),
             provider: SupportedProvider::Local(LocalProvider),
             password_file: None,
             git_branch: None,
@@ -160,14 +172,15 @@ mod tests {
             git_user_name: None,
             git_user_email: Some("test@example.com".to_string()),
             git_executable: None,
-            run_configs: None,
         };
+
         assert!(config.validate().is_ok());
     }
 
     #[test]
-    fn test_config_invalid_email() {
-        let config = Config {
+    fn test_provider_config_invalid_email() {
+        let config = ProviderConfig {
+            name: Some("local-test".to_string()),
             provider: SupportedProvider::Local(LocalProvider),
             password_file: None,
             git_branch: None,
@@ -175,23 +188,110 @@ mod tests {
             git_user_name: None,
             git_user_email: Some("test".to_string()),
             git_executable: None,
+        };
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_provider_config_missing_name() {
+        let config = ProviderConfig {
+            name: None,
+            provider: SupportedProvider::Local(LocalProvider),
+            password_file: None,
+            git_branch: None,
+            git_remote_url: None,
+            git_user_name: None,
+            git_user_email: None,
+            git_executable: None,
+        };
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_provider_config_default() {
+        let config = ProviderConfig::default();
+
+        assert_eq!(config.name, Some("local".to_string()));
+        assert_eq!(config.git_user_email, None);
+        assert_eq!(config.password_file, Config::local_provider_password_file());
+        assert_eq!(config.git_branch, Some("main".into()));
+        assert_eq!(config.git_remote_url, None);
+        assert_eq!(config.git_user_name, None);
+        assert_eq!(config.git_executable, None);
+    }
+
+    #[test]
+    fn test_config_valid() {
+        let config = Config {
+            default_provider: Some("local".into()),
+            providers: vec![ProviderConfig::default()],
             run_configs: None,
         };
+
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_config_invalid_default_provider() {
+        let config = Config {
+            default_provider: Some("nonexistent".into()),
+            providers: vec![ProviderConfig::default()],
+            run_configs: None,
+        };
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_config_invalid_no_providers() {
+        let config = Config {
+            default_provider: Some("local".into()),
+            providers: vec![],
+            run_configs: None,
+        };
+
         assert!(config.validate().is_err());
     }
 
     #[test]
     fn test_config_default() {
         let config = Config::default();
-        assert_eq!(config.provider, SupportedProvider::Local(LocalProvider));
-        assert_eq!(config.git_branch, Some("main".to_string()));
+
+        assert_eq!(config.default_provider, Some("local".to_string()));
+        assert_eq!(config.providers, vec![ProviderConfig::default()]);
+        assert_eq!(config.run_configs, None);
     }
 
     #[test]
     fn test_config_extract_provider() {
         let config = Config::default();
-        let provider = config.extract_provider();
-        assert_str_eq!(provider.name(), "LocalProvider");
+        let provider = config.extract_provider_config(None).unwrap();
+
+        assert_eq!(provider.name, Some("local".to_string()));
+    }
+
+    #[test]
+    fn test_config_extract_provider_with_name() {
+        let mut config = Config::default();
+        config.providers.push(ProviderConfig {
+            name: Some("custom".to_string()),
+            ..Default::default()
+        });
+        let provider = config
+            .extract_provider_config(Some("custom".into()))
+            .unwrap();
+
+        assert_eq!(provider.name, Some("custom".to_string()));
+    }
+
+    #[test]
+    fn test_config_extract_provider_not_found() {
+        let config = Config::default();
+        let result = config.extract_provider_config(Some("nonexistent".into()));
+
+        assert!(result.is_err());
     }
 
     #[test]

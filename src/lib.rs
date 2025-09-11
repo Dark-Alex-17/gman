@@ -1,16 +1,40 @@
-use anyhow::{Context, Result, anyhow, bail};
+//! Gman core library
+//!
+//! This crate provides two layers:
+//! - A small crypto helper API for envelope encrypting/decrypting strings.
+//! - Public modules for configuration and secret providers used by the CLI.
+//!
+//! Quick start for the crypto helpers:
+//!
+//! ```
+//! use gman::{encrypt_string, decrypt_string};
+//! use secrecy::SecretString;
+//!
+//! let password = SecretString::new("correct horse battery staple".into());
+//! let ciphertext = encrypt_string(password.clone(), "swordfish").unwrap();
+//! let plaintext = decrypt_string(password, &ciphertext).unwrap();
+//!
+//! assert_eq!(plaintext, "swordfish");
+//! ```
+//!
+//! The `config` and `providers` modules power the CLI. They can be embedded
+//! in other programs, but many functions interact with the user or the
+//! filesystem. Prefer `no_run` doctests for those.
+use anyhow::{anyhow, bail, Context, Result};
 use argon2::{
+    password_hash::{rand_core::RngCore, SaltString},
     Algorithm, Argon2, Params, Version,
-    password_hash::{SaltString, rand_core::RngCore},
 };
-use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
+use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use chacha20poly1305::{
-    Key, XChaCha20Poly1305, XNonce,
     aead::{Aead, KeyInit, OsRng},
+    Key, XChaCha20Poly1305, XNonce,
 };
 use secrecy::{ExposeSecret, SecretString};
 use zeroize::Zeroize;
+/// Configuration structures and helpers used by the CLI and library.
 pub mod config;
+/// Secret provider trait and implementations.
 pub mod providers;
 
 pub(crate) const HEADER: &str = "$VAULT";
@@ -35,12 +59,26 @@ fn derive_key(password: &SecretString, salt: &[u8]) -> Result<Key> {
         .hash_password_into(password.expose_secret().as_bytes(), salt, &mut key_bytes)
         .map_err(|e| anyhow!("argon2 into error: {:?}", e))?;
 
-    let cloned_key_bytes = key_bytes;
-    let key = Key::from_slice(&cloned_key_bytes);
+    let key = *Key::from_slice(&key_bytes);
     key_bytes.zeroize();
-    Ok(*key)
+    Ok(key)
 }
 
+/// Encrypt a UTF‑8 string using a password and return a portable envelope.
+///
+/// The returned value is a semicolon‑separated envelope containing metadata
+/// (header, version, KDF params) and base64 encoded salt, nonce and
+/// ciphertext. It is safe to store in configuration files.
+///
+/// Example
+/// ```
+/// use gman::encrypt_string;
+/// use secrecy::SecretString;
+///
+/// let pw = SecretString::new("password".into());
+/// let env = encrypt_string(pw, "hello").unwrap();
+/// assert!(env.starts_with("$VAULT;v1;argon2id;"));
+/// ```
 pub fn encrypt_string(password: impl Into<SecretString>, plaintext: &str) -> Result<String> {
     let password = password.into();
 
@@ -87,6 +125,21 @@ pub fn encrypt_string(password: impl Into<SecretString>, plaintext: &str) -> Res
     Ok(env)
 }
 
+/// Decrypt an envelope produced by [`encrypt_string`].
+///
+/// Returns the original plaintext on success or an error if the password is
+/// wrong, the envelope was tampered with, or the input is malformed.
+///
+/// Example
+/// ```
+/// use gman::{encrypt_string, decrypt_string};
+/// use secrecy::SecretString;
+///
+/// let pw = SecretString::new("pw".into());
+/// let env = encrypt_string(pw.clone(), "top secret").unwrap();
+/// let pt = decrypt_string(pw, &env).unwrap();
+/// assert_eq!(pt, "top secret");
+/// ```
 pub fn decrypt_string(password: impl Into<SecretString>, envelope: &str) -> Result<String> {
     let password = password.into();
 

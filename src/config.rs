@@ -1,12 +1,41 @@
+//! Application configuration and run-profile validation.
+//!
+//! The [`Config`] type captures global settings such as which secret provider
+//! to use and Git sync preferences. The [`RunConfig`] type describes how to
+//! inject secrets when wrapping a command.
+//!
+//! Example: validate a minimal run profile
+//! ```
+//! use gman::config::RunConfig;
+//! use validator::Validate;
+//!
+//! let rc = RunConfig{
+//!     name: Some("echo".into()),
+//!     secrets: Some(vec!["api_key".into()]),
+//!     files: None,
+//!     flag: None,
+//!     flag_position: None,
+//!     arg_format: None,
+//! };
+//! rc.validate().unwrap();
+//! ```
+use crate::providers::local::LocalProvider;
 use crate::providers::{SecretProvider, SupportedProvider};
+use anyhow::Result;
 use log::debug;
 use serde::{Deserialize, Serialize};
-use serde_with::DisplayFromStr;
 use serde_with::serde_as;
+use serde_with::{skip_serializing_none, DisplayFromStr};
 use std::borrow::Cow;
 use std::path::PathBuf;
 use validator::{Validate, ValidationError};
 
+#[skip_serializing_none]
+/// Describe how to inject secrets for a named command profile.
+///
+/// A valid profile either defines no flag/file settings or provides a complete
+/// set of `flag`, `flag_position`, and `arg_format`. Additionally, the flag
+/// mode and the file‑injection mode are mutually exclusive.
 #[derive(Debug, Clone, Validate, Serialize, Deserialize, PartialEq, Eq)]
 #[validate(schema(function = "flags_or_none", skip_on_field_errors = false))]
 #[validate(schema(function = "flags_or_files"))]
@@ -68,8 +97,24 @@ fn flags_or_files(run_config: &RunConfig) -> Result<(), ValidationError> {
 }
 
 #[serde_as]
+#[skip_serializing_none]
+/// Configuration for a secret provider.
+///
+/// Example: create a local provider config and validate it
+/// ```
+/// use gman::config::ProviderConfig;
+/// use gman::providers::SupportedProvider;
+/// use gman::providers::local::LocalProvider;
+/// use validator::Validate;
+///
+/// let provider = SupportedProvider::Local(LocalProvider);
+/// let provider_config = ProviderConfig { provider, ..Default::default() };
+/// provider_config.validate().unwrap();
+/// ```
 #[derive(Debug, Clone, Validate, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Config {
+pub struct ProviderConfig {
+    #[validate(required)]
+    pub name: Option<String>,
     #[serde_as(as = "DisplayFromStr")]
     pub provider: SupportedProvider,
     pub password_file: Option<PathBuf>,
@@ -79,26 +124,31 @@ pub struct Config {
     #[validate(email)]
     pub git_user_email: Option<String>,
     pub git_executable: Option<PathBuf>,
-    #[validate(nested)]
-    pub run_configs: Option<Vec<RunConfig>>,
 }
 
-impl Default for Config {
+impl Default for ProviderConfig {
     fn default() -> Self {
         Self {
-            provider: SupportedProvider::Local(Default::default()),
+            name: Some("local".into()),
+            provider: SupportedProvider::Local(LocalProvider),
             password_file: Config::local_provider_password_file(),
             git_branch: Some("main".into()),
             git_remote_url: None,
             git_user_name: None,
             git_user_email: None,
             git_executable: None,
-            run_configs: None,
         }
     }
 }
 
-impl Config {
+impl ProviderConfig {
+    /// Instantiate the configured secret provider.
+    ///
+    /// ```no_run
+    /// # use gman::config::ProviderConfig;
+    /// let provider = ProviderConfig::default().extract_provider();
+    /// println!("using provider: {}", provider.name());
+    /// ```
     pub fn extract_provider(&self) -> Box<dyn SecretProvider> {
         match &self.provider {
             SupportedProvider::Local(p) => {
@@ -107,15 +157,109 @@ impl Config {
             }
         }
     }
+}
 
-    pub fn local_provider_password_file() -> Option<PathBuf> {
-        let mut path = dirs::home_dir().map(|p| p.join(".gman_password"));
-        if let Some(p) = &path
-            && !p.exists()
-        {
-            path = None;
+#[serde_as]
+#[skip_serializing_none]
+/// Global configuration for the library and CLI.
+///
+/// Example: pick a provider and validate the configuration
+/// ```
+/// use gman::config::Config;
+/// use gman::config::ProviderConfig;
+/// use gman::providers::SupportedProvider;
+/// use gman::providers::local::LocalProvider;
+/// use validator::Validate;
+///
+/// let provider = SupportedProvider::Local(LocalProvider);
+/// let provider_config = ProviderConfig { provider, ..Default::default() };
+/// let cfg = Config{ providers: vec![provider_config], ..Default::default() };
+/// cfg.validate().unwrap();
+/// ```
+#[derive(Debug, Clone, Validate, Serialize, Deserialize, PartialEq, Eq)]
+#[validate(schema(function = "default_provider_exists"))]
+pub struct Config {
+    pub default_provider: Option<String>,
+    #[validate(length(min = 1))]
+    #[validate(nested)]
+    pub providers: Vec<ProviderConfig>,
+    #[validate(nested)]
+    pub run_configs: Option<Vec<RunConfig>>,
+}
+
+fn default_provider_exists(config: &Config) -> Result<(), ValidationError> {
+	if let Some(default) = &config.default_provider {
+		if config.providers.iter().any(|p| p.name.as_deref() == Some(default)) {
+			Ok(())
+		} else {
+			let mut err = ValidationError::new("default_provider_missing");
+			err.message = Some(Cow::Borrowed(
+				"The default_provider does not match any configured provider names",
+			));
+			Err(err)
+		}
+	} else {
+		Ok(())
+	}
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            default_provider: Some("local".into()),
+            providers: vec![ProviderConfig::default()],
+            run_configs: None,
         }
-
-        path
     }
+}
+
+impl Config {
+    /// Instantiate the configured secret provider.
+    ///
+    /// ```no_run
+    /// # use gman::config::Config;
+    /// let provider_config = Config::default().extract_provider_config(None);
+    /// println!("using provider config: {}", provider_config.unwrap().name);
+    /// ```
+    pub fn extract_provider_config(&self, provider_name: Option<String>) -> Result<ProviderConfig> {
+        let name = provider_name
+            .or_else(|| self.default_provider.clone())
+            .unwrap_or_else(|| "local".into());
+        self.providers
+            .iter()
+            .find(|p| p.name.as_deref() == Some(&name))
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("No provider configuration found for '{}'", name))
+    }
+
+    /// Discover the default password file for the local provider.
+    ///
+    /// On most systems this resolves to `~/.gman_password` when the file
+    /// exists, otherwise `None`.
+    pub fn local_provider_password_file() -> Option<PathBuf> {
+        let candidate = dirs::home_dir().map(|p| p.join(".gman_password"));
+        match candidate {
+            Some(p) if p.exists() => Some(p),
+            _ => None,
+        }
+    }
+}
+
+pub fn load_config() -> Result<Config> {
+    let mut config: Config = confy::load("gman", "config")?;
+    config.validate()?;
+
+    config
+        .providers
+        .iter_mut()
+        .filter(|p| matches!(p.provider, SupportedProvider::Local(_)))
+        .for_each(|p| {
+            if p.password_file.is_none()
+                && let Some(local_password_file) = Config::local_provider_password_file()
+            {
+                p.password_file = Some(local_password_file);
+            }
+        });
+
+    Ok(config)
 }

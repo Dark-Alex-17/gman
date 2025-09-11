@@ -1,29 +1,30 @@
-use anyhow::{Context, anyhow, bail};
+use anyhow::{anyhow, bail, Context};
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
 use std::fs;
 use zeroize::Zeroize;
 
-use crate::config::Config;
+use crate::config::ProviderConfig;
+use crate::providers::git_sync::{sync_and_push, SyncOpts};
 use crate::providers::SecretProvider;
-use crate::providers::git_sync::{SyncOpts, sync_and_push};
 use crate::{
     ARGON_M_COST_KIB, ARGON_P, ARGON_T_COST, HEADER, KDF, KEY_LEN, NONCE_LEN, SALT_LEN, VERSION,
 };
 use anyhow::Result;
 use argon2::{Algorithm, Argon2, Params, Version};
-use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
+use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use chacha20poly1305::aead::rand_core::RngCore;
 use chacha20poly1305::{
-    Key, XChaCha20Poly1305, XNonce,
     aead::{Aead, KeyInit, OsRng},
+    Key, XChaCha20Poly1305, XNonce,
 };
-use dialoguer::{Input, theme};
+use dialoguer::{theme, Input};
 use log::{debug, error};
 use serde::Deserialize;
 use theme::ColorfulTheme;
 use validator::Validate;
 
+/// Configuration for the local file-based provider.
 #[derive(Debug, Clone)]
 pub struct LocalProviderConfig {
     pub vault_path: String,
@@ -40,6 +41,25 @@ impl Default for LocalProviderConfig {
     }
 }
 
+/// File-based vault provider with optional Git sync.
+///
+/// This provider stores encrypted envelopes in a per-user configuration
+/// directory via `confy`. A password is obtained from a configured password
+/// file or via an interactive prompt.
+///
+/// Example
+/// ```no_run
+/// use gman::providers::local::LocalProvider;
+/// use gman::providers::SecretProvider;
+/// use gman::config::Config;
+///
+/// let provider = LocalProvider;
+/// let cfg = Config::default();
+/// // Will prompt for a password when reading/writing secrets unless a
+/// // password file is configured.
+/// // provider.set_secret(&cfg, "MY_SECRET", "value")?;
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 pub struct LocalProvider;
 
@@ -48,7 +68,7 @@ impl SecretProvider for LocalProvider {
         "LocalProvider"
     }
 
-    fn get_secret(&self, config: &Config, key: &str) -> Result<String> {
+    fn get_secret(&self, config: &ProviderConfig, key: &str) -> Result<String> {
         let vault: HashMap<String, String> = confy::load("gman", "vault").unwrap_or_default();
         let envelope = vault
             .get(key)
@@ -61,7 +81,7 @@ impl SecretProvider for LocalProvider {
         Ok(plaintext)
     }
 
-    fn set_secret(&self, config: &Config, key: &str, value: &str) -> Result<()> {
+    fn set_secret(&self, config: &ProviderConfig, key: &str, value: &str) -> Result<()> {
         let mut vault: HashMap<String, String> = confy::load("gman", "vault").unwrap_or_default();
         if vault.contains_key(key) {
             error!(
@@ -79,7 +99,7 @@ impl SecretProvider for LocalProvider {
         confy::store("gman", "vault", vault).with_context(|| "failed to save secret to the vault")
     }
 
-    fn update_secret(&self, config: &Config, key: &str, value: &str) -> Result<()> {
+    fn update_secret(&self, config: &ProviderConfig, key: &str, value: &str) -> Result<()> {
         let mut vault: HashMap<String, String> = confy::load("gman", "vault").unwrap_or_default();
 
         let password = get_password(config)?;
@@ -119,7 +139,7 @@ impl SecretProvider for LocalProvider {
         Ok(keys)
     }
 
-    fn sync(&self, config: &mut Config) -> Result<()> {
+    fn sync(&self, config: &mut ProviderConfig) -> Result<()> {
         let mut config_changed = false;
 
         if config.git_branch.is_none() {
@@ -139,9 +159,9 @@ impl SecretProvider for LocalProvider {
             let remote: String = Input::with_theme(&ColorfulTheme::default())
                 .with_prompt("Enter remote git URL to sync with")
                 .validate_with(|s: &String| {
-                    Config {
+                    ProviderConfig {
                         git_remote_url: Some(s.clone()),
-                        ..Config::default()
+                        ..ProviderConfig::default()
                     }
                     .validate()
                     .map(|_| ())
@@ -314,7 +334,7 @@ fn decrypt_string(password: &SecretString, envelope: &str) -> Result<String> {
     Ok(s)
 }
 
-fn get_password(config: &Config) -> Result<SecretString> {
+fn get_password(config: &ProviderConfig) -> Result<SecretString> {
     if let Some(password_file) = &config.password_file {
         let password = SecretString::new(
             fs::read_to_string(password_file)
@@ -333,10 +353,10 @@ fn get_password(config: &Config) -> Result<SecretString> {
 
 #[cfg(test)]
 mod tests {
-    use crate::derive_key;
-    use crate::providers::local::derive_key_with_params;
+    use super::*;
     use pretty_assertions::assert_eq;
-    use secrecy::SecretString;
+    use secrecy::{ExposeSecret, SecretString};
+    use tempfile::tempdir;
 
     #[test]
     fn test_derive_key() {
@@ -352,5 +372,27 @@ mod tests {
         let salt = [0u8; 16];
         let key = derive_key_with_params(&password, &salt, 10, 1, 1).unwrap();
         assert_eq!(key.as_slice().len(), 32);
+    }
+
+    #[test]
+    fn crypto_roundtrip_local_impl() {
+        let pw = SecretString::new("pw".into());
+        let msg = "hello world";
+        let env = encrypt_string(&pw, msg).unwrap();
+        let out = decrypt_string(&pw, &env).unwrap();
+        assert_eq!(out, msg);
+    }
+
+    #[test]
+    fn get_password_reads_password_file() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("pw.txt");
+        fs::write(&file, "secretpw\n").unwrap();
+        let cfg = ProviderConfig {
+            password_file: Some(file),
+            ..ProviderConfig::default()
+        };
+        let pw = get_password(&cfg).unwrap();
+        assert_eq!(pw.expose_secret(), "secretpw");
     }
 }
