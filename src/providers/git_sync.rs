@@ -89,7 +89,7 @@ fn resolve_git_username(git: &Path, name: Option<&String>) -> Result<String> {
         return Ok(name.to_string());
     }
 
-    run_git_config_capture(&git, &["config", "user.name"])
+    run_git_config_capture(git, &["config", "user.name"])
         .with_context(|| "unable to determine git username")
 }
 
@@ -99,7 +99,7 @@ fn resolve_git_email(git: &Path, email: Option<&String>) -> Result<String> {
         return Ok(email.to_string());
     }
 
-    run_git_config_capture(&git, &["config", "user.email"])
+    run_git_config_capture(git, &["config", "user.email"])
         .with_context(|| "unable to determine git user email")
 }
 
@@ -210,17 +210,15 @@ fn set_origin(git: &Path, repo: &Path, url: &str) -> Result<()> {
 
     if has_origin {
         run_git(git, repo, &["remote", "set-url", "origin", url])?;
-    } else {
-        if Confirm::with_theme(&ColorfulTheme::default())
-			.with_prompt(format!("Have you already created the remote origin '{url}' on the Git host so we can push to it?"))
-			.default(false)
-			.interact()?
-		{
-			run_git(git, repo, &["remote", "add", "origin", url])?;
-		} else {
-			return Err(anyhow!("Remote origin does not yet exist. Please create remote origin before synchronizing, then try again"));
-		}
-    }
+    } else if Confirm::with_theme(&ColorfulTheme::default())
+    			.with_prompt(format!("Have you already created the remote origin '{url}' on the Git host so we can push to it?"))
+    			.default(false)
+    			.interact()?
+    		{
+    			run_git(git, repo, &["remote", "add", "origin", url])?;
+    		} else {
+    			return Err(anyhow!("Remote origin does not yet exist. Please create remote origin before synchronizing, then try again"));
+    		}
     Ok(())
 }
 

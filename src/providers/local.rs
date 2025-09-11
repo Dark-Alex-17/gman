@@ -54,7 +54,7 @@ impl SecretProvider for LocalProvider {
             .get(key)
             .with_context(|| format!("key '{key}' not found in the vault"))?;
 
-        let password = get_password(&config)?;
+        let password = get_password(config)?;
         let plaintext = decrypt_string(&password, envelope)?;
         drop(password);
 
@@ -70,7 +70,7 @@ impl SecretProvider for LocalProvider {
             bail!("key '{key}' already exists");
         }
 
-        let password = get_password(&config)?;
+        let password = get_password(config)?;
         let envelope = encrypt_string(&password, value)?;
         drop(password);
 
@@ -82,7 +82,7 @@ impl SecretProvider for LocalProvider {
     fn update_secret(&self, config: &Config, key: &str, value: &str) -> Result<()> {
         let mut vault: HashMap<String, String> = confy::load("gman", "vault").unwrap_or_default();
 
-        let password = get_password(&config)?;
+        let password = get_password(config)?;
         let envelope = encrypt_string(&password, value)?;
         drop(password);
 
@@ -317,7 +317,7 @@ fn decrypt_string(password: &SecretString, envelope: &str) -> Result<String> {
 fn get_password(config: &Config) -> Result<SecretString> {
     if let Some(password_file) = &config.password_file {
         let password = SecretString::new(
-            fs::read_to_string(&password_file)
+            fs::read_to_string(password_file)
                 .with_context(|| format!("failed to read password file {:?}", password_file))?
                 .trim()
                 .to_string()

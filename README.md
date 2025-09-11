@@ -26,6 +26,34 @@ necessary secrets as environment variables or command-line flags.
 - **Dry Run Mode**: Preview the command and the secrets that will be injected without actually executing it using the 
   `--dry-run` flag.
 
+## Example Use Cases
+
+### Create/Get/Delete Secrets Securely As You Need From Any Configured Provider
+
+```shell
+# Add a secret to the 'local' provider
+echo "someApiKey" | gman add my_api_key
+
+# Retrieve a secret from the 'aws_secrets_manager' provider
+gman get -p aws_secrets_manager db_password
+
+# Delete a secret from the 'local' provider
+gman delete my_api_key
+```
+
+### Automatically Inject Secrets Into Any Command
+
+```shell
+# Can inject secrets as environment variables into the 'aws' CLI command
+gman aws sts get-caller-identity
+
+# Inject secrets into 'docker run' command via '-e' flags
+gman docker run --rm --entrypoint env busybox | grep -i 'token'
+
+# Inject secrets into configuration files automatically for the 'managarr' application
+gman managarr
+```
+
 ## Installation
 
 ### Cargo
@@ -73,10 +101,43 @@ git_executable: null # Defaults to 'git' in PATH
 run_configs: null # List of run configurations (profiles)
 ```
 
+## Providers
+`gman` supports multiple providers for secret storage. The default provider is `local`, which stores secrets in an 
+encrypted file on your filesystem. The following table shows the available and planned providers:
+
+**Key:**
+
+| Symbol | Status    |
+|--------|-----------|
+| ✅      | Supported |
+| 🕒     | Planned   |
+| 🚫     | Won't Add |
+
+
+| Provider Name                                                                                                            | Status | Configuration Docs       |  Comments                                  |
+|--------------------------------------------------------------------------------------------------------------------------|--------|--------------------------|--------------------------------------------|
+| `local`                                                                                                                  | ✅      | [Local](#provider-local) |                                            |
+| [`aws_secrets_manager`](https://docs.aws.amazon.com/secretsmanager/latest/userguide/intro.html)                          | 🕒     |                          |                                            |
+| [`aws_ssm_parameter_store`](https://docs.aws.amazon.com/secretsmanager/latest/userguide/integrating_parameterstore.html) | 🕒     |                          |                                            |
+| [`hashicorp_vault`](https://www.hashicorp.com/en/products/vault)                                                         | 🕒     |                          |                                            |
+| [`azure_key_vault`](https://azure.microsoft.com/en-us/products/key-vault/)                                               | 🕒     |                          |                                            |
+| [`gcp_secret_manager`](https://cloud.google.com/security/products/secret-manager?hl=en)                                  | 🕒     |                          |                                            |
+| [`1password`](https://1password.com/)                                                                                    | 🕒     |                          |                                            |
+| [`bitwarden`](https://bitwarden.com/)                                                                                    | 🕒     |                          |                                            |
+| [`dashlane`](https://www.dashlane.com/)                                                                                  | 🕒     |                          | Waiting for CLI support for adding secrets |
+| [`lastpass`](https://www.lastpass.com/)                                                                                  | 🕒     |                          |                                            |
+
 ### Provider: `local`
 
-The default `local` provider stores an encrypted vault file on your filesystem. For use across multiple systems, it can 
-sync with a remote Git repository.
+The default `local` provider stores an encrypted vault file on your filesystem. Any time you attempt to access the local 
+vault (e.g., adding, retrieving, or deleting secrets), `gman` will prompt you for the password you used to encrypt the 
+applicable secrets.
+
+Similar to [Ansible Vault](https://docs.ansible.com/ansible/latest/vault_guide/vault_managing_passwords.html#storing-passwords-in-files), `gman` lets you store the password in a file for convenience. This is done via the 
+`password_file` configuration option. If you choose to use a password file, ensure that it is secured with appropriate 
+file permissions (e.g., `chmod 600 ~/.gman_password`). The default file for the password file is `~/.gman_password`.
+
+For use across multiple systems, `gman` can sync with a remote Git repository.
 
 **Important Notes for Git Sync:**
 - You **must** create the remote repository on your Git provider (e.g., GitHub) *before* attempting to sync.
@@ -91,15 +152,25 @@ git_user_name: "Your Name"
 git_user_email: "your.email@example.com"
 ```
 
-### Run Configurations
+## Run Configurations
 
-Run configurations (or "profiles") tell `gman` how to inject secrets into a command. When you run `gman <command>`, it 
-looks for a profile with a `name` matching `<command>`. If found, it injects the specified secrets. If no profile is 
-found, `gman` will error out and report that it could not find the run config with that name.
+Run configurations (or "profiles") tell `gman` how to inject secrets into a command. Three modes of secret injection are
+supported:
+
+1. [**Environment Variables** (default)](#basic-run-config-environment-variables)
+2. [**Command-Line Flags**](#advanced-run-config-command-line-flags)
+3. [**Files**](#advanced-run-config-files)
+
+When you wrap a command with `gman` and don't specify a specific run configuration via `--profile`, `gman` will look for 
+a profile with a `name` matching `<command>`. If found, it injects the specified secrets. If no profile is found, `gman` 
+will error out and report that it could not find the run config with that name.
+
+You can manually specify which run configuration to use with the `--profile` flag. Again, if no profile is found with 
+that name, `gman` will error out.
 
 #### Important: Secret names are always injected in `UPPER_SNAKE_CASE` format.
 
-#### Basic Run Config (Environment Variables)
+### Environment Variable Secret Injection
 
 By default, secrets are injected as environment variables. The two required fields are `name` and `secrets`.
 
@@ -114,7 +185,7 @@ run_configs:
 When you run `gman aws ...`, `gman` will fetch these two secrets and expose them as environment variables to the `aws` 
 process.
 
-#### Advanced Run Config (Command-Line Flags)
+### Inject Secrets via Command-Line Flags
 
 For applications that don't read environment variables, you can configure `gman` to pass secrets as command-line flags. 
 This requires three additional fields: `flag`, `flag_position`, and `arg_format`.
@@ -122,8 +193,8 @@ This requires three additional fields: `flag`, `flag_position`, and `arg_format`
 - `flag`: The flag to use (e.g., `-e`).
 - `flag_position`: An integer indicating where to insert the flag in the command's arguments. `1` is immediately after 
   the command name.
-- `arg_format`: A string that defines how the secret is formatted. It **must** contain the placeholders `{key}` and 
-  `{value}`.
+- `arg_format`: A string that defines how the secret is formatted. It **must** contain the placeholders `{{key}}` and 
+  `{{value}}`.
 
 **Example:** A profile for `docker run` that uses the `-e` flag.
 ```yaml
@@ -134,12 +205,58 @@ run_configs:
       - my_app_db_password
     flag: -e
     flag_position: 2 # In 'docker run ...', the flag comes after 'run', so position 2.
-    arg_format: "{key}={value}"
+    arg_format: "{{key}}={{value}}"
 ```
 When you run `gman docker run my-image`, `gman` will execute a command similar to:
 `docker run -e MY_APP_API_KEY=... -e MY_APP_DB_PASSWORD=... my-image`
 
-## Usage
+### Inject Secrets into Files
+
+For applications that require secrets to be provided via files, you can configure `gman` to automatically populate 
+specified files with the secret values before executing the command, run the command, and then restore the original
+content regardless of command completion status.
+
+This just requires one additional field:
+
+- `files`: A list of _absolute_ file paths where the secret values should be written.
+
+**Example:** An implicit profile for [`managarr`](https://github.com/Dark-Alex-17/managarr) that injects the specified
+secrets into the corresponding configuration file. More than one file can be specified, and if `gman` can't find any
+specified secrets, it will leave the file unchanged.
+
+
+```yaml
+run_configs:
+  - name: managarr
+    secrets:
+      - radarr_api_key
+      - sonarr_api_key # Remember that secret names are always converted to UPPER_SNAKE_CASE
+    files:
+      - /home/user/.config/managarr/config.yml
+```
+
+And this is what my `managarr` configuration file looks like:
+
+```yaml
+radarr:
+  - name: Radarr
+    host: 192.168.0.105
+    port: 7878
+    api_token: {{RADARR_API_KEY}} # This will be replaced by gman with the actual secret value
+sonarr:
+  - name: Sonarr
+    host: 192.168.0.105
+    port: 8989
+    api_token: {{sonarr_api_key}} # gman is case-insensitive, so this will also be replaced correctly
+```
+
+Then, all you need to do to run `managarr` with the secrets injected is:
+
+```shell
+gman managarr
+```
+
+## Detailed Usage
 
 ### Storing and Managing Secrets
 

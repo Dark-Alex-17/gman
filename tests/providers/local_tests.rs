@@ -1,6 +1,5 @@
 use gman::providers::local::LocalProviderConfig;
 
-
 #[test]
 fn test_local_provider_config_default() {
     let config = LocalProviderConfig::default();

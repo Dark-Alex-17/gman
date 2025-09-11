@@ -9,11 +9,13 @@ use validator::{Validate, ValidationError};
 
 #[derive(Debug, Clone, Validate, Serialize, Deserialize, PartialEq, Eq)]
 #[validate(schema(function = "flags_or_none", skip_on_field_errors = false))]
+#[validate(schema(function = "flags_or_files"))]
 pub struct RunConfig {
     #[validate(required)]
     pub name: Option<String>,
     #[validate(required)]
     pub secrets: Option<Vec<String>>,
+    pub files: Option<Vec<PathBuf>>,
     pub flag: Option<String>,
     #[validate(range(min = 1))]
     pub flag_position: Option<usize>,
@@ -27,19 +29,21 @@ fn flags_or_none(run_config: &RunConfig) -> Result<(), ValidationError> {
         &run_config.arg_format,
     ) {
         (Some(_), Some(_), Some(format)) => {
-					let has_key = format.contains("{key}");
-					let has_value = format.contains("{value}");
-					if has_key && has_value {
-						Ok(())
-					} else {
-						let mut err = ValidationError::new("missing_placeholders");
-						err.message = Some(Cow::Borrowed("must contain both '{key}' and '{value}' (with the '{' and '}' characters) in the arg_format"));
-						err.add_param(Cow::Borrowed("has_key"), &has_key);
-						err.add_param(Cow::Borrowed("has_value"), &has_value);
-						Err(err)
-					}
-				},
-			(None, None, None) => Ok(()),
+            let has_key = format.contains("{{key}}");
+            let has_value = format.contains("{{value}}");
+            if has_key && has_value {
+                Ok(())
+            } else {
+                let mut err = ValidationError::new("missing_placeholders");
+                err.message = Some(Cow::Borrowed(
+                    "must contain both '{{key}}' and '{{value}}' (with the '{{' and '}}' characters) in the arg_format",
+                ));
+                err.add_param(Cow::Borrowed("has_key"), &has_key);
+                err.add_param(Cow::Borrowed("has_value"), &has_value);
+                Err(err)
+            }
+        }
+        (None, None, None) => Ok(()),
         _ => {
             let mut err = ValidationError::new("both_or_none");
             err.message = Some(Cow::Borrowed(
@@ -47,6 +51,19 @@ fn flags_or_none(run_config: &RunConfig) -> Result<(), ValidationError> {
             ));
             Err(err)
         }
+    }
+}
+
+fn flags_or_files(run_config: &RunConfig) -> Result<(), ValidationError> {
+    match (&run_config.flag, &run_config.files) {
+        (Some(_), Some(_)) => {
+            let mut err = ValidationError::new("flag_and_file");
+            err.message = Some(Cow::Borrowed(
+                "Cannot specify both 'flag' and 'file' in the same run configuration",
+            ));
+            Err(err)
+        }
+        _ => Ok(()),
     }
 }
 
@@ -93,10 +110,10 @@ impl Config {
 
     pub fn local_provider_password_file() -> Option<PathBuf> {
         let mut path = dirs::home_dir().map(|p| p.join(".gman_password"));
-        if let Some(p) = &path {
-            if !p.exists() {
-                path = None;
-            }
+        if let Some(p) = &path
+            && !p.exists()
+        {
+            path = None;
         }
 
         path

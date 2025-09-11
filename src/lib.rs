@@ -1,29 +1,29 @@
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use argon2::{
-	password_hash::{rand_core::RngCore, SaltString},
-	Algorithm, Argon2, Params, Version,
+    Algorithm, Argon2, Params, Version,
+    password_hash::{SaltString, rand_core::RngCore},
 };
-use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use chacha20poly1305::{
-	aead::{Aead, KeyInit, OsRng},
-	Key, XChaCha20Poly1305, XNonce,
+    Key, XChaCha20Poly1305, XNonce,
+    aead::{Aead, KeyInit, OsRng},
 };
 use secrecy::{ExposeSecret, SecretString};
 use zeroize::Zeroize;
-pub mod providers;
 pub mod config;
+pub mod providers;
 
-pub (in crate) const HEADER: &str = "$VAULT";
-pub (in crate) const VERSION: &str = "v1";
-pub (in crate) const KDF: &str = "argon2id";
+pub(crate) const HEADER: &str = "$VAULT";
+pub(crate) const VERSION: &str = "v1";
+pub(crate) const KDF: &str = "argon2id";
 
-pub (in crate) const ARGON_M_COST_KIB: u32 = 19_456;
-pub (in crate) const ARGON_T_COST: u32 = 2;
-pub (in crate) const ARGON_P: u32 = 1;
+pub(crate) const ARGON_M_COST_KIB: u32 = 19_456;
+pub(crate) const ARGON_T_COST: u32 = 2;
+pub(crate) const ARGON_P: u32 = 1;
 
-pub (in crate) const SALT_LEN: usize = 16;
-pub (in crate) const NONCE_LEN: usize = 24;
-pub (in crate) const KEY_LEN: usize = 32;
+pub(crate) const SALT_LEN: usize = 16;
+pub(crate) const NONCE_LEN: usize = 24;
+pub(crate) const KEY_LEN: usize = 32;
 
 fn derive_key(password: &SecretString, salt: &[u8]) -> Result<Key> {
     let params = Params::new(ARGON_M_COST_KIB, ARGON_T_COST, ARGON_P, Some(KEY_LEN))
@@ -32,14 +32,10 @@ fn derive_key(password: &SecretString, salt: &[u8]) -> Result<Key> {
 
     let mut key_bytes = [0u8; KEY_LEN];
     argon
-        .hash_password_into(
-            password.expose_secret().as_bytes(),
-            salt,
-            &mut key_bytes,
-        )
+        .hash_password_into(password.expose_secret().as_bytes(), salt, &mut key_bytes)
         .map_err(|e| anyhow!("argon2 into error: {:?}", e))?;
 
-    let cloned_key_bytes = key_bytes.clone();
+    let cloned_key_bytes = key_bytes;
     let key = Key::from_slice(&cloned_key_bytes);
     key_bytes.zeroize();
     Ok(*key)
@@ -211,7 +207,9 @@ mod tests {
         let env = encrypt_string(pw.clone(), msg).unwrap();
         let mut parts: Vec<&str> = env.split(';').collect();
         let ct_b64 = parts[6].strip_prefix("ct=").unwrap();
-        let mut ct = base64::engine::general_purpose::STANDARD.decode(ct_b64).unwrap();
+        let mut ct = base64::engine::general_purpose::STANDARD
+            .decode(ct_b64)
+            .unwrap();
         ct[0] ^= 0x01; // Flip a bit
         let new_ct_b64 = base64::engine::general_purpose::STANDARD.encode(&ct);
         let new_ct_part = format!("ct={}", new_ct_b64);

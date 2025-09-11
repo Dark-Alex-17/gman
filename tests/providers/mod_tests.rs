@@ -1,5 +1,5 @@
-use gman::providers::{ParseProviderError, SupportedProvider};
 use gman::providers::local::LocalProvider;
+use gman::providers::{ParseProviderError, SupportedProvider};
 use std::str::FromStr;
 
 #[test]
@@ -17,10 +17,7 @@ fn test_supported_provider_from_str_valid() {
 #[test]
 fn test_supported_provider_from_str_invalid() {
     let err = SupportedProvider::from_str("invalid").unwrap_err();
-    assert_eq!(
-        err.to_string(),
-        "unsupported provider 'invalid'"
-    );
+    assert_eq!(err.to_string(), "unsupported provider 'invalid'");
 }
 
 #[test]
