@@ -1,5 +1,5 @@
 use crate::command::preview_command;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use gman::config::{Config, ProviderConfig, RunConfig};
 use gman::providers::SecretProvider;
 use heck::ToSnakeCase;

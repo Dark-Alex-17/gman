@@ -1,4 +1,12 @@
-# gman - Universal Credential Manager
+# G-Man - Universal Credential Manager
+
+![Check](https://github.com/Dark-Alex-17/gman/actions/workflows/check.yml/badge.svg)
+![Test](https://github.com/Dark-Alex-17/gman/actions/workflows/test.yml/badge.svg)
+![LOC](https://tokei.rs/b1/github/Dark-Alex-17/gman?category=code)
+[![crates.io link](https://img.shields.io/crates/v/gman.svg)](https://crates.io/crates/gman)
+![Release](https://img.shields.io/github/v/release/Dark-Alex-17/gman?color=%23c694ff)
+![Crate.io downloads](https://img.shields.io/crates/d/gman?label=Crate%20downloads)
+[![GitHub Downloads](https://img.shields.io/github/downloads/Dark-Alex-17/gman/total.svg?label=GitHub%20downloads)](https://github.com/Dark-Alex-17/gman/releases)
 
 `gman` is a command-line tool for managing and injecting secrets for your scripts, automations, and applications.
 It provides a single, secure interface to store, retrieve, and inject secrets so you can stop hand-rolling config

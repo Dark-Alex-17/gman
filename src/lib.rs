@@ -20,15 +20,15 @@
 //! The `config` and `providers` modules power the CLI. They can be embedded
 //! in other programs, but many functions interact with the user or the
 //! filesystem. Prefer `no_run` doctests for those.
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use argon2::{
-    password_hash::{rand_core::RngCore, SaltString},
     Algorithm, Argon2, Params, Version,
+    password_hash::{SaltString, rand_core::RngCore},
 };
-use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use chacha20poly1305::{
-    aead::{Aead, KeyInit, OsRng},
     Key, XChaCha20Poly1305, XNonce,
+    aead::{Aead, KeyInit, OsRng},
 };
 use secrecy::{ExposeSecret, SecretString};
 use zeroize::Zeroize;

@@ -1,0 +1,84 @@
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+name: Check
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  fmt:
+    name: stable / fmt
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Run cargo fmt
+        run: cargo fmt -- --check
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+  clippy:
+    name: ${{ matrix.toolchain }} / clippy
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [stable, beta]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Run clippy action
+        uses: clechasseur/rs-clippy-check@v3
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+  doc:
+    name: nightly / doc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Run cargo doc
+        run: cargo doc --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: --cfg docsrs
+
+  msrv:
+    name: 1.89.0 / check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install 1.89.0
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.89.0
+
+      - name: cargo +1.89.0 check
+        run: cargo check

@@ -4,9 +4,9 @@ use dialoguer::Confirm;
 use dialoguer::theme::ColorfulTheme;
 use indoc::formatdoc;
 use log::debug;
-use std::{env, fs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::{env, fs};
 use validator::Validate;
 
 #[derive(Debug, Validate, Clone)]
@@ -41,11 +41,17 @@ pub fn sync_and_push(opts: &SyncOpts<'_>) -> Result<()> {
         .with_context(|| "get default vault path")?;
     let repo_vault = repo_dir.join("vault.yml");
     if default_vault.exists() && !repo_vault.exists() {
-        fs::rename(&default_vault, &repo_vault)
-            .with_context(|| format!("move {} -> {}", default_vault.display(), repo_vault.display()))?;
+        fs::rename(&default_vault, &repo_vault).with_context(|| {
+            format!(
+                "move {} -> {}",
+                default_vault.display(),
+                repo_vault.display()
+            )
+        })?;
     } else if !repo_vault.exists() {
         // Ensure an empty vault exists to allow initial commits
-        fs::write(&repo_vault, "{}\n").with_context(|| format!("create {}", repo_vault.display()))?;
+        fs::write(&repo_vault, "{}\n")
+            .with_context(|| format!("create {}", repo_vault.display()))?;
     }
 
     let git = resolve_git(opts.git_executable.as_ref())?;
@@ -250,7 +256,7 @@ fn stage_vault_only(git: &Path, repo: &Path) -> Result<()> {
 
 fn fetch_and_pull(git: &Path, repo: &Path, branch: &str) -> Result<()> {
     // Fetch all refs from origin (safe even if branch doesn't exist remotely)
-    run_git(git, repo, &["fetch", "origin", "--prune"]) 
+    run_git(git, repo, &["fetch", "origin", "--prune"])
         .with_context(|| "Failed to fetch changes from remote")?;
 
     let origin_ref = format!("origin/{branch}");
@@ -265,19 +271,16 @@ fn fetch_and_pull(git: &Path, repo: &Path, branch: &str) -> Result<()> {
                 .with_context(|| "Failed to checkout remote branch over local state")?;
             run_git(git, repo, &["reset", "--hard", &origin_ref])
                 .with_context(|| "Failed to hard reset to remote branch")?;
-            run_git(git, repo, &["clean", "-fd"]).with_context(|| "Failed to clean untracked files")?;
+            run_git(git, repo, &["clean", "-fd"])
+                .with_context(|| "Failed to clean untracked files")?;
         }
         return Ok(());
     }
 
     // If we have local history and the remote branch exists, fast-forward.
     if remote_has_branch {
-        run_git(
-            git,
-            repo,
-            &["merge", "--ff-only", &origin_ref],
-        )
-        .with_context(|| "Failed to merge remote changes")?;
+        run_git(git, repo, &["merge", "--ff-only", &origin_ref])
+            .with_context(|| "Failed to merge remote changes")?;
     }
     Ok(())
 }
@@ -286,7 +289,12 @@ fn has_remote_branch(git: &Path, repo: &Path, branch: &str) -> bool {
     Command::new(git)
         .arg("-C")
         .arg(repo)
-        .args(["show-ref", "--verify", "--quiet", &format!("refs/remotes/origin/{}", branch)])
+        .args([
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/remotes/origin/{}", branch),
+        ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
@@ -399,7 +407,10 @@ mod tests {
     #[test]
     fn test_repo_name_from_url() {
         assert_eq!(repo_name_from_url("git@github.com:user/vault.git"), "vault");
-        assert_eq!(repo_name_from_url("https://github.com/user/test-vault.git"), "test-vault");
+        assert_eq!(
+            repo_name_from_url("https://github.com/user/test-vault.git"),
+            "test-vault"
+        );
         assert_eq!(repo_name_from_url("ssh://git@example.com/x/y/z.git"), "z");
         assert_eq!(repo_name_from_url("git@example.com:ns/repo"), "repo");
     }

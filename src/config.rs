@@ -25,7 +25,7 @@ use anyhow::Result;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-use serde_with::{skip_serializing_none, DisplayFromStr};
+use serde_with::{DisplayFromStr, skip_serializing_none};
 use std::borrow::Cow;
 use std::path::PathBuf;
 use validator::{Validate, ValidationError};
@@ -188,19 +188,23 @@ pub struct Config {
 }
 
 fn default_provider_exists(config: &Config) -> Result<(), ValidationError> {
-	if let Some(default) = &config.default_provider {
-		if config.providers.iter().any(|p| p.name.as_deref() == Some(default)) {
-			Ok(())
-		} else {
-			let mut err = ValidationError::new("default_provider_missing");
-			err.message = Some(Cow::Borrowed(
-				"The default_provider does not match any configured provider names",
-			));
-			Err(err)
-		}
-	} else {
-		Ok(())
-	}
+    if let Some(default) = &config.default_provider {
+        if config
+            .providers
+            .iter()
+            .any(|p| p.name.as_deref() == Some(default))
+        {
+            Ok(())
+        } else {
+            let mut err = ValidationError::new("default_provider_missing");
+            err.message = Some(Cow::Borrowed(
+                "The default_provider does not match any configured provider names",
+            ));
+            Err(err)
+        }
+    } else {
+        Ok(())
+    }
 }
 
 impl Default for Config {

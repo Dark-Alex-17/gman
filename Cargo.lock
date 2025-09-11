@@ -225,6 +225,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46c5e41b57b8bba42a04676d81cb89e9ee8e859a1a66f80a5a72e1cb76b34d43"
 
 [[package]]
+name = "cargo-husky"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b02b629252fe8ef6460461409564e2c21d0c8e77e0944f3d189ff06c4e932ad"
+
+[[package]]
 name = "cc"
 version = "1.2.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -708,6 +714,7 @@ dependencies = [
  "assert_cmd",
  "backtrace",
  "base64",
+ "cargo-husky",
  "chacha20poly1305",
  "chrono",
  "clap",

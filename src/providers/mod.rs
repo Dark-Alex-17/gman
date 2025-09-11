@@ -16,7 +16,7 @@ pub mod local;
 
 use crate::config::ProviderConfig;
 use crate::providers::local::LocalProvider;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::Deserialize;
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;

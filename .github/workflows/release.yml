@@ -1,0 +1,548 @@
+name: Create release
+
+permissions:
+  pull-requests: write
+  contents: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: 'Specify the type of version bump'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  bump-version:
+    name: bump-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure SSH for Git
+        if: env.ACT != 'true'
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.RELEASE_BOT_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H github.com >> ~/.ssh/known_hosts
+
+      - name: Checkout repository
+        if: env.ACT != 'true'
+        uses: actions/checkout@v3
+        with:
+          ssh-key: ${{ secrets.RELEASE_BOT_SSH_KEY }}
+          fetch-depth: 0
+
+      - name: Checkout repository
+        if: env.ACT == 'true'
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Commitizen
+        run: |
+          python -m pip install --upgrade pip
+          pip install commitizen
+          npm install -g conventional-changelog-cli
+
+      - name: Configure Git user
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version with Commitizen
+        run: |
+          cz bump --yes --increment ${{ github.event.inputs.bump_type }}
+
+      - name: Amend commit message to include '[skip ci]'
+        run: |
+          git commit --amend --no-edit -m "$(git log -1 --pretty=%B) [skip ci]"
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Get the new version tag
+        id: version
+        run: |
+          mkdir -p artifacts
+          NEW_TAG=$(cz version --project)
+          echo "New version: $NEW_TAG"
+          echo "version=$NEW_TAG" >> $GITHUB_ENV
+          echo "$NEW_TAG" > artifacts/release-version
+
+      - name: Get the previous version tag
+        id: prev_version
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 ${GITHUB_SHA}^)
+          echo "Previous tag: $PREV_TAG"
+          echo "prev_version=$PREV_TAG" >> $GITHUB_ENV
+
+      - name: Bump Cargo.toml version
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          VERSION: ${{ env.version }}
+        run: |
+          set -euo pipefail
+          : "${VERSION:?env.version is empty}"
+
+          # Ignore Act's local artifact dir noise
+          echo artifacts/ >> .git/info/exclude || true
+
+          # Edit the version line right after name="gman"
+          sed -E -i '
+            /^[[:space:]]*name[[:space:]]*=[[:space:]]*"gman"[[:space:]]*$/ {
+              n
+              s|^[[:space:]]*version[[:space:]]*=[[:space:]]*"[^"]*"|version = "'"$VERSION"'"|
+            }
+          ' Cargo.toml
+
+          cargo update || true
+
+          # Git config that helps in Act
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+          git status --porcelain
+          git diff --name-only -- Cargo.toml Cargo.lock || true
+
+          if ! git diff --quiet -- Cargo.toml Cargo.lock; then
+            git add -u -- Cargo.toml Cargo.lock
+            git commit -m "chore: bump Cargo.toml to $VERSION"
+          else
+            echo "No changes to commit (already at $VERSION)"
+          fi
+
+      - name: Generate changelog for the version bump
+        id: changelog
+        run: |
+          changelog=$(conventional-changelog -p angular -i CHANGELOG.md -s --from ${{ env.prev_version }} --to ${{ env.version }})
+          echo "$changelog" > artifacts/changelog.md
+          echo "changelog_body=$(cat artifacts/changelog.md)" >> $GITHUB_ENV
+
+      - name: Push changes
+        if: env.ACT != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push origin --follow-tags
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Upload the changed Cargo files (Act)
+        if: env.ACT == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bumped-cargo-files
+          path: |
+            Cargo.toml
+            Cargo.lock
+
+  build-release-artifacts:
+    name: build-release
+    needs: [bump-version]
+    runs-on: ${{ matrix.job.os }}
+    env:
+      RUST_BACKTRACE: 1
+    strategy:
+      fail-fast: true
+      matrix:
+        # prettier-ignore
+        job:
+          - { name: "macOS-arm64",        os: "macOS-latest",   target: "aarch64-apple-darwin",           artifact_suffix: "macos-arm64",     use-cross: true                             }
+          - { name: "macOS-amd64",        os: "macOS-latest",   target: "x86_64-apple-darwin",            artifact_suffix: "macos"                                                        }
+          - { name: "windows-amd64",      os: "windows-latest", target: "x86_64-pc-windows-msvc",         artifact_suffix: "windows"                                                      }
+          - { name: "windows-aarch64",    os: "windows-latest", target: "aarch64-pc-windows-msvc",        artifact_suffix: "windows-aarch64", use-cross: true                             }
+          - { name: "linux-gnu",          os: "ubuntu-latest",  target: "x86_64-unknown-linux-gnu",       artifact_suffix: "linux"                                                        }
+          - { name: "linux-musl",         os: "ubuntu-latest",  target: "x86_64-unknown-linux-musl",      artifact_suffix: "linux-musl",      use-cross: true,                            }
+          - { name: "linux-aarch64-gnu",  os: "ubuntu-latest",  target: "aarch64-unknown-linux-gnu",      artifact_suffix: "aarch64-gnu",     use-cross: true, test-bin: "--bin gman" }
+          - { name: "linux-aarch64-musl", os: "ubuntu-latest",  target: "aarch64-unknown-linux-musl",     artifact_suffix: "aarch64-musl",    use-cross: true, test-bin: "--bin gman" }
+          - { name: "linux-arm-gnu",      os: "ubuntu-latest",  target: "arm-unknown-linux-gnueabi",      artifact_suffix: "armv6-gnu",       use-cross: true, test-bin: "--bin gman" }
+          - { name: "linux-arm-musl",     os: "ubuntu-latest",  target: "arm-unknown-linux-musleabihf",   artifact_suffix: "armv6-musl",      use-cross: true, test-bin: "--bin gman" }
+          - { name: "linux-armv7-gnu",    os: "ubuntu-latest",  target: "armv7-unknown-linux-gnueabihf",  artifact_suffix: "armv7-gnu",       use-cross: true, test-bin: "--bin gman" }
+          - { name: "linux-armv7-musl",   os: "ubuntu-latest",  target: "armv7-unknown-linux-musleabihf", artifact_suffix: "armv7-musl",      use-cross: true, test-bin: "--bin gman" }
+        rust: [stable]
+
+    steps:
+      - name: Check if actor is repository owner
+        if: ${{ github.actor != github.repository_owner && env.ACT != 'true' }}
+        run: |
+          echo "You are not authorized to run this workflow."
+          exit 1
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Ensure repository is up-to-date
+        if: env.ACT != 'true'
+        run: |
+          git fetch --all
+          git pull
+
+      - name: Get bumped Cargo files (Act)
+        if: env.ACT == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: bumped-cargo-files
+          path: ${{ github.workspace }}
+
+      - uses: actions/cache@v3
+        name: Cache Cargo registry
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('Cargo.lock') }}
+
+      - uses: actions/cache@v3
+        if: startsWith(matrix.job.name, 'linux-')
+        with:
+          path: ~/.cargo/bin
+          key: ${{ runner.os }}-cargo-bin-${{ hashFiles('.github/workflows/release.yml') }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        name: Set Rust toolchain
+        with:
+          targets: ${{ matrix.job.target }}
+
+      - uses: taiki-e/setup-cross-toolchain-action@v1
+        with:
+          # NB: sets CARGO_BUILD_TARGET evar - do not need --target flag in build
+          target: ${{ matrix.job.target }}
+
+      - uses: taiki-e/install-action@cross
+        if: ${{ matrix.job.use-cross }}
+
+      - name: Installing needed Ubuntu dependencies
+        if: matrix.job.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          sudo apt-get -y update
+          case ${{ matrix.job.target }} in
+            arm*-linux-*) sudo apt-get -y install gcc-arm-linux-gnueabihf ;;
+            aarch64-*-linux-*) sudo apt-get -y install gcc-aarch64-linux-gnu ;;
+          esac
+
+      - name: Build
+        run: cargo build --release --verbose --target=${{ matrix.job.target }} --locked
+
+      - name: Verify file
+        shell: bash
+        run: |
+          file target/${{ matrix.job.target }}/release/gman
+
+      - name: Test
+        if: matrix.job.target != 'aarch64-apple-darwin' && matrix.job.target != 'aarch64-pc-windows-msvc'
+        run: cargo test --release --verbose --target=${{ matrix.job.target }} ${{ matrix.job.test-bin }}
+
+      - name: Packaging final binary (Windows)
+        if: matrix.job.os == 'windows-latest'
+        shell: bash
+        run: |
+          cd target/${{ matrix.job.target }}/release
+          BINARY_NAME=gman.exe
+          if [ "${{ matrix.job.target }}" != "aarch64-pc-windows-msvc" ]; then
+            # strip the binary
+            strip $BINARY_NAME
+          fi
+          RELEASE_NAME=gman-${{ matrix.job.artifact_suffix }}
+          mkdir -p artifacts
+          tar czvf $RELEASE_NAME.tar.gz $BINARY_NAME
+          # create sha checksum files
+          certutil -hashfile $RELEASE_NAME.tar.gz sha256 | grep -E [A-Fa-f0-9]{64} > $RELEASE_NAME.sha256
+          echo "RELEASE_NAME=$RELEASE_NAME" >> $GITHUB_ENV
+
+      - name: Packaging final binary (macOS and Linux)
+        if: matrix.job.os != 'windows-latest'
+        shell: bash
+        run: |
+          # set the right strip executable
+          STRIP="strip";
+          case ${{ matrix.job.target }} in
+            arm*-linux-*) STRIP="arm-linux-gnueabihf-strip" ;;
+            aarch64-*-linux-*)    STRIP="aarch64-linux-gnu-strip" ;;
+          esac;
+          cd target/${{ matrix.job.target }}/release
+          BINARY_NAME=gman
+          # strip the binary
+          "$STRIP" "$BINARY_NAME"
+          RELEASE_NAME=gman-${{ matrix.job.artifact_suffix }}
+          tar czvf $RELEASE_NAME.tar.gz $BINARY_NAME
+          # create sha checksum files
+          shasum -a 256 $RELEASE_NAME.tar.gz > $RELEASE_NAME.sha256
+          echo "RELEASE_NAME=$RELEASE_NAME" >> $GITHUB_ENV
+
+      - name: Add artifacts
+        run: |
+          mkdir -p artifacts
+          cp target/${{ matrix.job.target }}/release/${{ env.RELEASE_NAME }}.tar.gz artifacts/
+          cp target/${{ matrix.job.target }}/release/${{ env.RELEASE_NAME }}.sha256 artifacts/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ env.RELEASE_NAME }}
+          path: artifacts
+          overwrite: true
+
+  publish-github-release:
+    name: publish-github-release
+    needs: [build-release-artifacts]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if actor is repository owner
+        if: ${{ github.actor != github.repository_owner  && env.ACT != 'true' }}
+        run: |
+          echo "You are not authorized to run this workflow."
+          exit 1
+
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Ensure repository is up-to-date
+        if: env.ACT != 'true'
+        run: |
+          git fetch --all
+          git pull
+
+      - name: Set environment variables
+        run: |
+          release_version="$(cat ./artifacts/release-version)"
+          echo "RELEASE_VERSION=$release_version" >> $GITHUB_ENV
+          changelog_body="$(cat ./artifacts/changelog.md)"
+          echo "changelog_body=$(cat artifacts/changelog.md)" >> $GITHUB_ENV
+
+      - name: Validate release environment variables
+        run: |
+          echo "Release version: ${{ env.RELEASE_VERSION }}"
+          echo "Changelog body: ${{ env.changelog_body }}"
+
+      - name: Create a GitHub Release
+        if: env.ACT != 'true'
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: |
+            artifacts/gman-macos-arm64.tar.gz
+            artifacts/gman-macos-arm64.sha256
+            artifacts/gman-macos.tar.gz
+            artifacts/gman-macos.sha256
+            artifacts/gman-windows.tar.gz
+            artifacts/gman-windows.sha256
+            artifacts/gman-windows-aarch64.tar.gz
+            artifacts/gman-windows-aarch64.sha256
+            artifacts/gman-linux.tar.gz
+            artifacts/gman-linux.sha256
+            artifacts/gman-linux-musl.tar.gz
+            artifacts/gman-linux-musl.sha256
+            artifacts/gman-aarch64-gnu.tar.gz
+            artifacts/gman-aarch64-gnu.sha256
+            artifacts/gman-aarch64-musl.tar.gz
+            artifacts/gman-aarch64-musl.sha256
+            artifacts/gman-armv6-gnu.tar.gz
+            artifacts/gman-armv6-gnu.sha256
+            artifacts/gman-armv6-musl.tar.gz
+            artifacts/gman-armv6-musl.sha256
+            artifacts/gman-armv7-gnu.tar.gz
+            artifacts/gman-armv7-gnu.sha256
+            artifacts/gman-armv7-musl.tar.gz
+            artifacts/gman-armv7-musl.sha256
+          tag_name: v${{ env.RELEASE_VERSION }}
+          name: 'v${{ env.RELEASE_VERSION }}'
+          body: ${{ env.changelog_body }}
+          draft: false
+          prerelease: false
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          path: artifacts
+          overwrite: true
+
+  publish-chocolatey-package:
+    needs: [publish-github-release]
+    name: Publish Chocolatey Package
+    runs-on: windows-latest
+    steps:
+      - name: Check if actor is repository owner
+        if: ${{ github.actor != github.repository_owner  && env.ACT != 'true' }}
+        run: |
+          echo "You are not authorized to run this workflow."
+          exit 1
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Get release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Set release assets and version
+        shell: pwsh
+        run: |
+          # Read the first column from the SHA256 file
+          $windows_sha = Get-Content ./artifacts/gman-windows.sha256 | ForEach-Object { $_.Split(' ')[0] }
+          Add-Content -Path $env:GITHUB_ENV -Value "WINDOWS_SHA=$windows_sha"
+
+          # Read the release version from the release-version file
+          $release_version = Get-Content ./artifacts/release-version
+          Add-Content -Path $env:GITHUB_ENV -Value "RELEASE_VERSION=$release_version"
+
+      - name: Validate release environment variables
+        run: |
+          echo "Release SHA windows: ${{ env.WINDOWS_SHA }}"
+          echo "Release version: ${{ env.RELEASE_VERSION }}"
+
+      - name: Package and Publish package to Chocolatey
+        if: env.ACT != 'true'
+        run: |
+          mkdir ./deployment/chocolatey/tools
+          # Run packaging script
+          python "./deployment/chocolatey/packager.py" ${{ env.RELEASE_VERSION }} "./deployment/chocolatey/gman.nuspec.template" "./deployment/chocolatey/gman.nuspec" ${{ env.WINDOWS_SHA }}
+          python "./deployment/chocolatey/packager.py" ${{ env.RELEASE_VERSION }} "./deployment/chocolatey/chocolateyinstall.ps1.template" "./deployment/chocolatey/tools/chocolateyinstall.ps1" ${{ env.WINDOWS_SHA }}
+
+          # Publish to Chocolatey
+          cd ./deployment/chocolatey
+          choco pack
+          echo y | choco install gman -dv -s .
+          $version = gman --version
+          $version = $version -replace " ", "."
+          choco push $version.nupkg -s https://push.chocolatey.org/ --api-key ${{ secrets.CHOCOLATEY_API_KEY }};
+
+  publish-homebrew-formula:
+    needs: [publish-github-release]
+    name: Update Homebrew formulas
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if actor is repository owner
+        if: ${{ github.actor != github.repository_owner  && env.ACT != 'true' }}
+        run: |
+          echo "You are not authorized to run this workflow."
+          exit 1
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Get release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Set release assets and version
+        shell: bash
+        run: |
+          # Set environment variables
+          macos_sha="$(cat ./artifacts/gman-macos.sha256 | awk '{print $1}')"
+          echo "MACOS_SHA=$macos_sha" >> $GITHUB_ENV
+          macos_sha_arm="$(cat ./artifacts/gman-macos-arm64.sha256 | awk '{print $1}')"
+          echo "MACOS_SHA_ARM=$macos_sha_arm" >> $GITHUB_ENV
+          linux_sha="$(cat ./artifacts/gman-linux-musl.sha256 | awk '{print $1}')"
+          echo "LINUX_SHA=$linux_sha" >> $GITHUB_ENV
+          release_version="$(cat ./artifacts/release-version)"
+          echo "RELEASE_VERSION=$release_version" >> $GITHUB_ENV
+
+      - name: Validate release environment variables
+        run: |
+          echo "Release SHA macos: ${{ env.MACOS_SHA }}"
+          echo "Release SHA macos-arm: ${{ env.MACOS_SHA_ARM }}"
+          echo "Release SHA linux musl: ${{ env.LINUX_SHA }}"
+          echo "Release version: ${{ env.RELEASE_VERSION }}"
+
+      - name: Execute Homebrew packaging script
+        if: env.ACT != 'true'
+        run: |
+          # run packaging script
+          python "./deployment/homebrew/packager.py" ${{ env.RELEASE_VERSION }} "./deployment/homebrew/gman.rb.template" "./gman.rb" ${{ env.MACOS_SHA }} ${{ env.MACOS_SHA_ARM }} ${{ env.LINUX_SHA }}
+
+      - name: Push changes to Homebrew tap
+        if: env.ACT != 'true'
+        env:
+          TOKEN: ${{ secrets.GMAN_GITHUB_TOKEN }}
+        run: |
+          # push to Git
+          git config --global user.name "Dark-Alex-17"
+          git config --global user.email "alex.j.tusa@gmail.com"
+          git clone https://Dark-Alex-17:${{ secrets.GMAN_GITHUB_TOKEN }}@github.com/Dark-Alex-17/homebrew-gman.git
+          rm homebrew-gman/Formula/gman.rb
+          cp gman.rb homebrew-gman/Formula
+          cd homebrew-gman
+          git add .
+          git diff-index --quiet HEAD || git commit -am "Update formula for G-Man release ${{ env.RELEASE_VERSION }}"
+          git push https://$TOKEN@github.com/Dark-Alex-17/homebrew-gman.git
+
+  publish-crate:
+    needs: publish-github-release
+    name: Publish Crate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if actor is repository owner
+        if: ${{ github.actor != github.repository_owner  && env.ACT != 'true' }}
+        run: |
+          echo "You are not authorized to run this workflow."
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get bumped Cargo files (Act)
+        if: env.ACT == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: bumped-cargo-files
+          path: ${{ github.workspace }}
+
+      - name: Ensure repository is up-to-date
+        if: env.ACT != 'true'
+        run: |
+          git fetch --all
+          git pull
+
+      - uses: actions/cache@v3
+        name: Cache Cargo registry
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('Cargo.lock') }}
+
+      - uses: actions/cache@v3
+        with:
+          path: ~/.cargo/bin
+          key: ${{ runner.os }}-cargo-bin-${{ hashFiles('.github/workflows/release.yml') }}
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: katyo/publish-crates@v2
+        if: env.ACT != 'true'
+        with:
+          registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
