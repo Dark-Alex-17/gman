@@ -242,12 +242,12 @@ radarr:
   - name: Radarr
     host: 192.168.0.105
     port: 7878
-    api_token: {{RADARR_API_KEY}} # This will be replaced by gman with the actual secret value
+    api_token: '{{RADARR_API_KEY}}' # This will be replaced by gman with the actual secret value
 sonarr:
   - name: Sonarr
     host: 192.168.0.105
     port: 8989
-    api_token: {{sonarr_api_key}} # gman is case-insensitive, so this will also be replaced correctly
+    api_token: '{{sonarr_api_key}}' # gman is case-insensitive, so this will also be replaced correctly
 ```
 
 Then, all you need to do to run `managarr` with the secrets injected is:

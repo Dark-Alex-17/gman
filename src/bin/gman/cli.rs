@@ -243,3 +243,35 @@ pub fn parse_args(
     }
     Ok(args)
 }
+
+#[cfg(test)]
+mod tests {
+	use std::collections::HashMap;
+	use gman::config::RunConfig;
+	use crate::cli::generate_files_secret_injections;
+
+	#[test]
+	fn test_generate_files_secret_injections() {
+		let mut secrets = HashMap::new();
+		secrets.insert("SECRET1".to_string(), "value1".to_string());
+		let temp_dir = tempfile::tempdir().unwrap();
+		let file_path = temp_dir.path().join("test.txt");
+		std::fs::write(&file_path, "{{secret1}}").unwrap();
+
+		let run_config = RunConfig {
+			name: Some("test".to_string()),
+			secrets: Some(vec!["secret1".to_string()]),
+			files: Some(vec![file_path.clone()]),
+			flag: None,
+			flag_position: None,
+			arg_format: None,
+		};
+
+		let result = generate_files_secret_injections(secrets, &run_config).unwrap();
+
+		assert_eq!(result.len(), 1);
+		assert_eq!(result[0].0, &file_path);
+		assert_eq!(result[0].1, "{{secret1}}");
+		assert_eq!(result[0].2, "value1");
+	}
+}
