@@ -70,7 +70,7 @@ struct Cli {
     provider: Option<ProviderKind>,
 
     /// Specify a run profile to use when wrapping a command
-    #[arg(long)]
+    #[arg(long, short)]
     profile: Option<String>,
 
     /// Output the command that will be run instead of executing it
@@ -95,7 +95,8 @@ enum Commands {
         name: String,
     },
 
-    /// Update an existing secret in the configured secret provider
+    /// Update an existing secret in the configured secret provider (if supported by the provider)
+    /// If a provider does not support updating secrets, this command will return an error.
     Update {
         /// Name of the secret to update
         name: String,
