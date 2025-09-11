@@ -218,8 +218,8 @@ impl Config {
     ///
     /// ```no_run
     /// # use gman::config::Config;
-    /// let provider_config = Config::default().extract_provider_config(None);
-    /// println!("using provider config: {}", provider_config.unwrap().name);
+    /// let provider_config = Config::default().extract_provider_config(None).unwrap();
+    /// println!("using provider config: {:?}", provider_config.name);
     /// ```
     pub fn extract_provider_config(&self, provider_name: Option<String>) -> Result<ProviderConfig> {
         let name = provider_name

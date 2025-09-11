@@ -10,49 +10,78 @@ files or sprinkling environment variables everywhere.
 certs—with a provider, then either fetch them directly or run your command through `gman` to inject what it needs as
 environment variables, flags, or file content.
 
+## Quick Examples: Before vs After
+
+These examples show how `gman` reduces friction when running tools that need secrets. The run profile snippets referenced
+here are shown later in this README under [Run Configurations](#run-configurations).
+
+### AWS CLI (env vars)
+**Before:**
+```shell
+export AWS_ACCESS_KEY_ID=...
+export AWS_SECRET_ACCESS_KEY=...
+aws sts get-caller-identity
+```
+
+**After (with a run profile named `aws`):**
+```shell
+gman aws sts get-caller-identity
+````
+
+### Docker (flags)
+**Before:**
+```shell
+docker run -e API_KEY=... -e DB_PASSWORD=... my/image
+```
+
+**After (with a run profile named `docker` that uses `-e` flags):**
+```shell
+gman docker run my/image
+```
+  - Pro Tip: Run `gman --dry-run docker run my/image` to preview the full command with masked values
+
+### Config file injection
+**Before:**
+```shell
+# Place plaintext secrets directly in configuration files (not recommended)
+# Or use a tool like `envsubst` to replace placeholders; e.g.
+export RADARR_API_KEY=...
+export SONARR_API_KEY=...
+envsubst < ~/.config/managarr/config.yml.template > ~/.config/managarr/config.yml
+managarr radarr list movies
+```
+
+**After (with a run profile named `managarr` that injects files):**
+```shell
+# `gman` injects secret values into the file(s), runs the command, then restores the original content
+gman managarr radarr list movies
+```
+
+### Example roundtrip of adding, retrieving, and using a secret
+```shell
+# Add a secret (value read from stdin)
+echo "mySuperSecretValue" | gman add my_api_key
+# Retrieve a secret
+gman get my_api_key
+# Use a secret in a wrapped command (with an 'aws' run profile defined)
+gman aws sts get-caller-identity
+```
+
 ## Features
 
-- Secure encryption for stored secrets
-- Pluggable providers (local by default; more can be added)
-- Git sync for local vaults to move secrets across machines
-- Command wrapping to inject secrets for any program
-- Customizable run profiles (env, flags, or files)
-- Consistent secret naming: input is snake_case; injected as UPPER_SNAKE_CASE
-- Direct retrieval via `gman get ...`
-- Dry-run to preview wrapped commands and secret injection
-
-## Example Use Cases
-
-### Create/Get/Delete Secrets Securely As You Need From Any Configured Provider
-
-```shell
-# Add a secret to the 'local' provider
-echo "someApiKey" | gman add my_api_key
-
-# Retrieve a secret from the 'aws_secrets_manager' provider
-gman get -p aws_secrets_manager db_password
-
-# Delete a secret from the 'local' provider
-gman delete my_api_key
-```
-
-### Automatically Inject Secrets Into Any Command
-
-```shell
-# Can inject secrets as environment variables into the 'aws' CLI command
-gman aws sts get-caller-identity
-
-# Inject secrets into 'docker run' command via '-e' flags
-gman docker run --rm --entrypoint env busybox | grep -i 'token'
-
-# Inject secrets into configuration files automatically for the 'managarr' application
-gman managarr
-```
+- **Secure encryption** for stored secrets
+- **Pluggable providers** (local by default; more planned)
+- **Git sync for local vaults** to move secrets across machines
+- **Command wrapping** to inject secrets for any program
+- **Customizable run profiles** (env, flags, or files)
+- **Consistent secret naming**: input is snake_case; injected as UPPER_SNAKE_CASE
+- **Direct secret retrieval** via `gman get ...`
+- **Dry-run** to preview wrapped commands and secret injection
 
 ## Installation
 
 ### Cargo
-If you have Cargo installed, then you can install gman from Crates.io:
+If you have Cargo installed, then you can install `gman` from Crates.io:
 
 ```shell
 cargo install gman
@@ -139,7 +168,7 @@ Similar to [Ansible Vault](https://docs.ansible.com/ansible/latest/vault_guide/v
 `password_file` configuration option. If you choose to use a password file, ensure that it is secured with appropriate 
 file permissions (e.g., `chmod 600 ~/.gman_password`). The default file for the password file is `~/.gman_password`.
 
-For use across multiple systems, `gman` can sync with a remote Git repository.
+For use across multiple systems, `gman` can sync with a remote Git repository (requires `git` to be installed).
 
 **Important Notes for Git Sync:**
 - You **must** create the remote repository on your Git provider (e.g., GitHub) *before* attempting to sync.
@@ -160,6 +189,25 @@ providers:
     git_user_name: "Your Name"
     git_user_email: "your.email@example.com"
 ```
+
+Repository layout and file tracking
+- By default (no sync), secrets are stored in a single file: `~/.config/gman/vault.yml`.
+- After configuring a remote and running `gman sync` for the first time:
+  - A dedicated repository directory is created under the config dir, derived from the remote name, e.g. `~/.config/gman/.vault` or `~/.config/gman/.test-vault`.
+  - The existing `vault.yml` is moved into that directory as `~/.config/gman/.<repo-name>/vault.yml`.
+  - Only `vault.yml` is tracked and committed in that repository; other files in the config directory are ignored.
+- With multiple `local` providers each pointing at different remotes, each gets its own `.repo-name` directory, so you can switch between isolated sets of secrets.
+
+Security and encryption basics
+- Client-side encryption: Secrets are encrypted before being written to disk. The local provider uses Argon2id for key
+  derivation and XChaCha20-Poly1305 (AEAD) for encryption/authentication.
+- Strong defaults: A unique random salt and nonce are generated with the OS RNG for every encryption; Argon2id parameters
+  are tuned for interactive usage and can evolve in future versions.
+- Tamper detection: The AEAD ensures decryption fails if the password is wrong or the ciphertext is modified.
+- Envelope format: The stored value encodes header, version, KDF params, and base64-encoded salt, nonce, and ciphertext
+  to enable robust, portable decryption.
+- Memory hygiene: Sensitive buffers are wiped after use (zeroized), and secrets are handled with types (like SecretString)
+  that reduce accidental exposure through logs and debug prints. No plaintext secrets are logged.
 
 ## Run Configurations
 
@@ -341,15 +389,16 @@ Example: two AWS Secrets Manager providers named `lab` and `prod`.
 default_provider: prod
 providers:
   - name: lab
-    provider: aws_secrets_manager
-    # Additional provider-specific settings (e.g., region, role_arn, profile)
-    # region: us-east-1
-    # role_arn: arn:aws:iam::111111111111:role/lab-access
+    provider: local
+    password_file: /home/user/.lab_gman_password
+    git_branch: main
+    git_remote_url: git@github.com:username/lab-vault.git
 
   - name: prod
-    provider: aws_secrets_manager
-    # region: us-east-1
-    # role_arn: arn:aws:iam::222222222222:role/prod-access
+    provider: local
+    password_file: /home/user/.prod_gman_password
+    git_branch: main
+    git_remote_url: git@github.com:username/prod-vault.git
 
 run_configs:
   - name: aws

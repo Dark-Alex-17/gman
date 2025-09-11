@@ -2,10 +2,11 @@ use anyhow::{anyhow, bail, Context};
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
 use std::fs;
+use std::path::{Path, PathBuf};
 use zeroize::Zeroize;
 
 use crate::config::ProviderConfig;
-use crate::providers::git_sync::{sync_and_push, SyncOpts};
+use crate::providers::git_sync::{repo_name_from_url, sync_and_push, SyncOpts};
 use crate::providers::SecretProvider;
 use crate::{
     ARGON_M_COST_KIB, ARGON_P, ARGON_T_COST, HEADER, KDF, KEY_LEN, NONCE_LEN, SALT_LEN, VERSION,
@@ -69,7 +70,8 @@ impl SecretProvider for LocalProvider {
     }
 
     fn get_secret(&self, config: &ProviderConfig, key: &str) -> Result<String> {
-        let vault: HashMap<String, String> = confy::load("gman", "vault").unwrap_or_default();
+        let vault_path = active_vault_path(config)?;
+        let vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
         let envelope = vault
             .get(key)
             .with_context(|| format!("key '{key}' not found in the vault"))?;
@@ -82,7 +84,8 @@ impl SecretProvider for LocalProvider {
     }
 
     fn set_secret(&self, config: &ProviderConfig, key: &str, value: &str) -> Result<()> {
-        let mut vault: HashMap<String, String> = confy::load("gman", "vault").unwrap_or_default();
+        let vault_path = active_vault_path(config)?;
+        let mut vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
         if vault.contains_key(key) {
             error!(
                 "Key '{key}' already exists in the vault. Use a different key or delete the existing one first."
@@ -96,11 +99,12 @@ impl SecretProvider for LocalProvider {
 
         vault.insert(key.to_string(), envelope);
 
-        confy::store("gman", "vault", vault).with_context(|| "failed to save secret to the vault")
+        store_vault(&vault_path, &vault).with_context(|| "failed to save secret to the vault")
     }
 
     fn update_secret(&self, config: &ProviderConfig, key: &str, value: &str) -> Result<()> {
-        let mut vault: HashMap<String, String> = confy::load("gman", "vault").unwrap_or_default();
+        let vault_path = active_vault_path(config)?;
+        let mut vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
 
         let password = get_password(config)?;
         let envelope = encrypt_string(&password, value)?;
@@ -113,27 +117,29 @@ impl SecretProvider for LocalProvider {
                 .with_context(|| format!("key '{key}' not found in the vault"))?;
             *vault_entry = envelope;
 
-            return confy::store("gman", "vault", vault)
+            return store_vault(&vault_path, &vault)
                 .with_context(|| "failed to save secret to the vault");
         }
 
         vault.insert(key.to_string(), envelope);
-        confy::store("gman", "vault", vault).with_context(|| "failed to save secret to the vault")
+        store_vault(&vault_path, &vault).with_context(|| "failed to save secret to the vault")
     }
 
-    fn delete_secret(&self, key: &str) -> Result<()> {
-        let mut vault: HashMap<String, String> = confy::load("gman", "vault").unwrap_or_default();
+    fn delete_secret(&self, config: &ProviderConfig, key: &str) -> Result<()> {
+        let vault_path = active_vault_path(config)?;
+        let mut vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
         if !vault.contains_key(key) {
             error!("Key '{key}' does not exist in the vault.");
             bail!("key '{key}' does not exist");
         }
 
         vault.remove(key);
-        confy::store("gman", "vault", vault).with_context(|| "failed to save secret to the vault")
+        store_vault(&vault_path, &vault).with_context(|| "failed to save secret to the vault")
     }
 
-    fn list_secrets(&self) -> Result<Vec<String>> {
-        let vault: HashMap<String, String> = confy::load("gman", "vault").unwrap_or_default();
+    fn list_secrets(&self, config: &ProviderConfig) -> Result<Vec<String>> {
+        let vault_path = active_vault_path(config)?;
+        let vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
         let keys: Vec<String> = vault.keys().cloned().collect();
 
         Ok(keys)
@@ -188,6 +194,54 @@ impl SecretProvider for LocalProvider {
 
         sync_and_push(&sync_opts)
     }
+}
+
+fn default_vault_path() -> Result<PathBuf> {
+    confy::get_configuration_file_path("gman", "vault").with_context(|| "get config dir")
+}
+
+fn base_config_dir() -> Result<PathBuf> {
+    default_vault_path()?
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| anyhow!("Failed to determine config dir"))
+}
+
+fn repo_dir_for_config(config: &ProviderConfig) -> Result<Option<PathBuf>> {
+    if let Some(remote) = &config.git_remote_url {
+        let name = repo_name_from_url(remote);
+        let dir = base_config_dir()?.join(format!(".{}", name));
+        Ok(Some(dir))
+    } else {
+        Ok(None)
+    }
+}
+
+fn active_vault_path(config: &ProviderConfig) -> Result<PathBuf> {
+    if let Some(dir) = repo_dir_for_config(config)?
+        && dir.exists()
+    {
+        return Ok(dir.join("vault.yml"));
+    }
+
+    default_vault_path()
+}
+
+fn load_vault(path: &Path) -> Result<HashMap<String, String>> {
+    if !path.exists() {
+        return Ok(HashMap::new());
+    }
+    let s = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    let map: HashMap<String, String> = serde_yaml::from_str(&s).unwrap_or_default();
+    Ok(map)
+}
+
+fn store_vault(path: &Path, map: &HashMap<String, String>) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    let s = serde_yaml::to_string(map).with_context(|| "serialize vault")?;
+    fs::write(path, s).with_context(|| format!("write {}", path.display()))
 }
 
 fn encrypt_string(password: &SecretString, plaintext: &str) -> Result<String> {

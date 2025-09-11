@@ -4,7 +4,7 @@ use dialoguer::Confirm;
 use dialoguer::theme::ColorfulTheme;
 use indoc::formatdoc;
 use log::debug;
-use std::env;
+use std::{env, fs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use validator::Validate;
@@ -25,12 +25,28 @@ pub fn sync_and_push(opts: &SyncOpts<'_>) -> Result<()> {
     opts.validate()
         .with_context(|| "invalid git sync options")?;
     let commit_message = format!("chore: sync @ {}", Utc::now().to_rfc3339());
-    let repo_dir = confy::get_configuration_file_path("gman", "vault")
+    let config_dir = confy::get_configuration_file_path("gman", "vault")
         .with_context(|| "get config dir")?
         .parent()
         .map(Path::to_path_buf)
-        .ok_or_else(|| anyhow!("Failed to determine repo dir"))?;
-    std::fs::create_dir_all(&repo_dir).with_context(|| format!("create {}", repo_dir.display()))?;
+        .ok_or_else(|| anyhow!("Failed to determine config dir"))?;
+
+    let remote_url = opts.remote_url.as_ref().expect("no remote url defined");
+    let repo_name = repo_name_from_url(remote_url);
+    let repo_dir = config_dir.join(format!(".{}", repo_name));
+    fs::create_dir_all(&repo_dir).with_context(|| format!("create {}", repo_dir.display()))?;
+
+    // Move the default vault into the repo dir on first sync so only vault.yml is tracked.
+    let default_vault = confy::get_configuration_file_path("gman", "vault")
+        .with_context(|| "get default vault path")?;
+    let repo_vault = repo_dir.join("vault.yml");
+    if default_vault.exists() && !repo_vault.exists() {
+        fs::rename(&default_vault, &repo_vault)
+            .with_context(|| format!("move {} -> {}", default_vault.display(), repo_vault.display()))?;
+    } else if !repo_vault.exists() {
+        // Ensure an empty vault exists to allow initial commits
+        fs::write(&repo_vault, "{}\n").with_context(|| format!("create {}", repo_vault.display()))?;
+    }
 
     let git = resolve_git(opts.git_executable.as_ref())?;
     ensure_git_available(&git)?;
@@ -42,7 +58,6 @@ pub fn sync_and_push(opts: &SyncOpts<'_>) -> Result<()> {
         .trim()
         .to_string();
     let branch = opts.branch.as_ref().expect("no target branch defined");
-    let remote_url = opts.remote_url.as_ref().expect("no remote url defined");
 
     debug!(
         "{}",
@@ -74,7 +89,7 @@ pub fn sync_and_push(opts: &SyncOpts<'_>) -> Result<()> {
 
     // Stage and commit any subsequent local changes after aligning with remote
     // so we don't merge uncommitted local state.
-    stage_all(&git, &repo_dir)?;
+    stage_vault_only(&git, &repo_dir)?;
 
     commit_now(&git, &repo_dir, &commit_message)?;
 
@@ -228,8 +243,8 @@ fn set_origin(git: &Path, repo: &Path, url: &str) -> Result<()> {
     Ok(())
 }
 
-fn stage_all(git: &Path, repo: &Path) -> Result<()> {
-    run_git(git, repo, &["add", "-A"])?;
+fn stage_vault_only(git: &Path, repo: &Path) -> Result<()> {
+    run_git(git, repo, &["add", "vault.yml"])?;
     Ok(())
 }
 
@@ -321,6 +336,16 @@ fn commit_now(git: &Path, repo: &Path, msg: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn repo_name_from_url(url: &str) -> String {
+    let mut s = url;
+    if let Some(idx) = s.rfind('/') {
+        s = &s[idx + 1..];
+    } else if let Some(idx) = s.rfind(':') {
+        s = &s[idx + 1..];
+    }
+    s.trim_end_matches(".git").to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -369,5 +394,13 @@ mod tests {
         unsafe {
             env::remove_var("GIT_EXECUTABLE");
         }
+    }
+
+    #[test]
+    fn test_repo_name_from_url() {
+        assert_eq!(repo_name_from_url("git@github.com:user/vault.git"), "vault");
+        assert_eq!(repo_name_from_url("https://github.com/user/test-vault.git"), "test-vault");
+        assert_eq!(repo_name_from_url("ssh://git@example.com/x/y/z.git"), "z");
+        assert_eq!(repo_name_from_url("git@example.com:ns/repo"), "repo");
     }
 }

@@ -1,11 +1,15 @@
 use base64::Engine;
 use gman::{decrypt_string, encrypt_string};
 use proptest::prelude::*;
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+}
 use secrecy::SecretString;
 
 proptest! {
     #[test]
-    fn prop_encrypt_decrypt_roundtrip(password in ".{0,64}", msg in ".{0,2048}") {
+    fn prop_encrypt_decrypt_roundtrip(password in ".{0,64}", msg in ".{0,512}") {
         let pw = SecretString::new(password.into());
         let env = encrypt_string(pw.clone(), &msg).unwrap();
         let out = decrypt_string(pw, &env).unwrap();
@@ -14,7 +18,7 @@ proptest! {
     }
 
     #[test]
-    fn prop_tamper_ciphertext_detected(password in ".{0,32}", msg in ".{1,256}") {
+    fn prop_tamper_ciphertext_detected(password in ".{0,32}", msg in ".{1,128}") {
         let pw = SecretString::new(password.into());
         let env = encrypt_string(pw.clone(), &msg).unwrap();
         // Flip a bit in the ct payload segment

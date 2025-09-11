@@ -34,8 +34,8 @@ pub trait SecretProvider {
             self.name()
         ))
     }
-    fn delete_secret(&self, key: &str) -> Result<()>;
-    fn list_secrets(&self) -> Result<Vec<String>> {
+    fn delete_secret(&self, config: &ProviderConfig, key: &str) -> Result<()>;
+    fn list_secrets(&self, _config: &ProviderConfig) -> Result<Vec<String>> {
         Err(anyhow!(
             "list secrets is not supported for the provider {}",
             self.name()

@@ -17,7 +17,7 @@ const ARG_FORMAT_PLACEHOLDER_VALUE: &str = "{{value}}";
 pub fn wrap_and_run_command(
     secrets_provider: Box<dyn SecretProvider>,
     config: &Config,
-		provider_config: &ProviderConfig,
+    provider_config: &ProviderConfig,
     tokens: Vec<OsString>,
     profile_name: Option<String>,
     dry_run: bool,
@@ -270,7 +270,7 @@ mod tests {
         fn set_secret(&self, _config: &ProviderConfig, _key: &str, _value: &str) -> Result<()> {
             Ok(())
         }
-        fn delete_secret(&self, _key: &str) -> Result<()> {
+        fn delete_secret(&self, _config: &ProviderConfig, _key: &str) -> Result<()> {
             Ok(())
         }
         fn sync(&self, _config: &mut ProviderConfig) -> Result<()> {
@@ -345,7 +345,7 @@ mod tests {
     #[test]
     fn test_wrap_and_run_command_no_profile() {
         let cfg = Config::default();
-			let provider_cfg = ProviderConfig::default();
+        let provider_cfg = ProviderConfig::default();
         let prov: Box<dyn SecretProvider> = Box::new(DummyProvider);
         let tokens = vec![OsString::from("echo"), OsString::from("hi")];
         let err = wrap_and_run_command(prov, &cfg, &provider_cfg, tokens, None, true).unwrap_err();
@@ -367,7 +367,7 @@ mod tests {
             run_configs: Some(vec![run_cfg]),
             ..Config::default()
         };
-			let provider_cfg = ProviderConfig::default();
+        let provider_cfg = ProviderConfig::default();
         let prov: Box<dyn SecretProvider> = Box::new(DummyProvider);
 
         // Capture stderr for dry_run preview

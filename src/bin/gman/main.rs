@@ -41,11 +41,11 @@ enum OutputFormat {
 )]
 struct Cli {
     /// Specify the output format
-    #[arg(short, long, value_enum)]
+    #[arg(short, long, global = true, value_enum, env = "GMAN_OUTPUT")]
     output: Option<OutputFormat>,
 
     /// Specify the secret provider to use (defaults to 'default_provider' in config (usually 'local'))
-    #[arg(long, value_enum)]
+    #[arg(long, value_enum, global = true, env = "GMAN_PROVIDER")]
     provider: Option<String>,
 
     /// Specify a run profile to use when wrapping a command
@@ -53,7 +53,7 @@ struct Cli {
     profile: Option<String>,
 
     /// Output the command that will be run instead of executing it
-    #[arg(long)]
+    #[arg(long, global = true)]
     dry_run: bool,
 
     #[command(subcommand)]
@@ -162,14 +162,16 @@ fn main() -> Result<()> {
         }
         Commands::Delete { name } => {
             let snake_case_name = name.to_snake_case().to_uppercase();
-            secrets_provider.delete_secret(&snake_case_name).map(|_| {
-                if cli.output.is_none() {
-                    println!("✓ Secret '{snake_case_name}' deleted from the vault.")
-                }
-            })?;
+            secrets_provider
+                .delete_secret(&provider_config, &snake_case_name)
+                .map(|_| {
+                    if cli.output.is_none() {
+                        println!("✓ Secret '{snake_case_name}' deleted from the vault.")
+                    }
+                })?;
         }
         Commands::List {} => {
-            let secrets = secrets_provider.list_secrets()?;
+            let secrets = secrets_provider.list_secrets(&provider_config)?;
             if secrets.is_empty() {
                 match cli.output {
                     Some(OutputFormat::Json) => {
