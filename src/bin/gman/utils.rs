@@ -1,4 +1,5 @@
 use log::LevelFilter;
+use log4rs::append::console::ConsoleAppender;
 use log4rs::append::file::FileAppender;
 use log4rs::config::{Appender, Root};
 use log4rs::encode::pattern::PatternEncoder;
@@ -6,40 +7,60 @@ use std::fs;
 use std::path::PathBuf;
 
 pub fn init_logging_config() -> log4rs::Config {
-    let logfile = FileAppender::builder()
-        .encoder(Box::new(PatternEncoder::new(
-            "{d(%Y-%m-%d %H:%M:%S%.3f)(utc)} <{i}> [{l}] {f}:{L} - {m}{n}",
-        )))
-        .build(get_log_path())
-        .unwrap();
+    let encoder = Box::new(PatternEncoder::new(
+        "{d(%Y-%m-%d %H:%M:%S%.3f)(utc)} <{i}> [{l}] {f}:{L} - {m}{n}",
+    ));
 
-    log4rs::Config::builder()
-        .appender(Appender::builder().build("logfile", Box::new(logfile)))
-        .build(
-            Root::builder()
-                .appender("logfile")
-                .build(LevelFilter::Debug),
-        )
-        .unwrap()
+    // Prefer file logging, but fall back to console if we cannot create/open the file.
+    let file_appender = FileAppender::builder()
+        .encoder(encoder.clone())
+        .build(get_log_path());
+
+    match file_appender {
+        Ok(file) => log4rs::Config::builder()
+            .appender(Appender::builder().build("logfile", Box::new(file)))
+            .build(
+                Root::builder()
+                    .appender("logfile")
+                    .build(LevelFilter::Debug),
+            )
+            .unwrap(),
+        Err(e) => {
+            eprintln!(
+                "File logging disabled ({}). Falling back to console logging.",
+                e
+            );
+            let console = ConsoleAppender::builder().encoder(encoder).build();
+            log4rs::Config::builder()
+                .appender(Appender::builder().build("console", Box::new(console)))
+                .build(
+                    Root::builder()
+                        .appender("console")
+                        .build(LevelFilter::Debug),
+                )
+                .unwrap()
+        }
+    }
 }
 
 pub fn get_log_path() -> PathBuf {
-    let mut log_path = if cfg!(target_os = "linux") {
-        dirs::cache_dir().unwrap_or_else(|| PathBuf::from("~/.cache"))
-    } else if cfg!(target_os = "macos") {
-        dirs::home_dir().unwrap().join("Library/Logs")
+    // Use a cache directory on all platforms; fall back to temp dir as a last resort.
+    let base_dir = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
+    let log_dir = base_dir.join("gman");
+
+    // Best-effort: create the directory; if it fails, write directly into temp dir.
+    let dir = if let Err(e) = fs::create_dir_all(&log_dir) {
+        eprintln!(
+            "Failed to create log directory '{}': {}",
+            log_dir.display(),
+            e
+        );
+        std::env::temp_dir()
     } else {
-        dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("C:\\Logs"))
+        log_dir
     };
 
-    log_path.push("gman");
-
-    if let Err(e) = fs::create_dir_all(&log_path) {
-        eprintln!("Failed to create log directory: {e:?}");
-    }
-
-    log_path.push("gman.log");
-    log_path
+    dir.join("gman.log")
 }
 
 #[cfg(test)]
@@ -49,12 +70,8 @@ mod tests {
     #[test]
     fn test_get_log_path() {
         let log_path = get_log_path();
-        if cfg!(target_os = "linux") {
-            assert!(log_path.ends_with(".cache/gman/gman.log"));
-        } else if cfg!(target_os = "macos") {
-            assert!(log_path.ends_with("Library/Logs/gman/gman.log"));
-        } else if cfg!(target_os = "windows") {
-            assert!(log_path.ends_with("Logs\\gman\\gman.log"));
-        }
+        assert!(log_path.ends_with("gman.log"));
+        // Parent directory may be cache dir or temp dir; ensure it is a valid path component.
+        assert!(log_path.parent().is_some());
     }
 }

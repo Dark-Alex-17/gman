@@ -108,7 +108,9 @@ enum Commands {
 }
 
 fn main() -> Result<()> {
-    log4rs::init_config(utils::init_logging_config())?;
+    if let Err(e) = log4rs::init_config(utils::init_logging_config()) {
+        eprintln!("Failed to initialize logging: {e}");
+    }
     panic::set_hook(Box::new(|info| {
         panic_hook(info);
     }));
