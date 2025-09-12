@@ -250,6 +250,17 @@ impl Config {
     }
 }
 
+/// Load and validate the application configuration.
+///
+/// This uses the `confy` crate to load the configuration from a file
+/// (e.g. `~/.config/gman/config.yaml`). If the file does
+/// not exist, a default configuration is created and saved.
+///
+/// ```no_run
+/// # use gman::config::load_config;
+/// let config = load_config().unwrap();
+/// println!("loaded config: {:?}", config);
+/// ```
 pub fn load_config() -> Result<Config> {
     let mut config: Config = confy::load("gman", "config")?;
     config.validate()?;
@@ -267,4 +278,9 @@ pub fn load_config() -> Result<Config> {
         });
 
     Ok(config)
+}
+
+/// Returns the configuration file path that `confy` will use for this app.
+pub fn get_config_file_path() -> Result<PathBuf> {
+    Ok(confy::get_configuration_file_path("gman", "config")?)
 }
