@@ -21,12 +21,13 @@
 //! ```
 use crate::providers::local::LocalProvider;
 use crate::providers::{SecretProvider, SupportedProvider};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use log::debug;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use serde_with::{DisplayFromStr, skip_serializing_none};
 use std::borrow::Cow;
+use std::fs;
 use std::path::PathBuf;
 use validator::{Validate, ValidationError};
 
@@ -262,7 +263,27 @@ impl Config {
 /// println!("loaded config: {:?}", config);
 /// ```
 pub fn load_config() -> Result<Config> {
-    let mut config: Config = confy::load("gman", "config")?;
+    let xdg_path = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
+
+    let mut config: Config = if let Some(base) = xdg_path.as_ref() {
+        let app_dir = base.join("gman");
+        let yml = app_dir.join("config.yml");
+        let yaml = app_dir.join("config.yaml");
+        if yml.exists() || yaml.exists() {
+            let load_path = if yml.exists() { &yml } else { &yaml };
+            let content = fs::read_to_string(load_path)
+                .with_context(|| format!("failed to read config file '{}'", load_path.display()))?;
+            let cfg: Config = serde_yaml::from_str(&content).with_context(|| {
+                format!("failed to parse YAML config at '{}'", load_path.display())
+            })?;
+            cfg
+        } else {
+            confy::load("gman", "config")?
+        }
+    } else {
+        confy::load("gman", "config")?
+    };
+
     config.validate()?;
 
     config
@@ -282,5 +303,15 @@ pub fn load_config() -> Result<Config> {
 
 /// Returns the configuration file path that `confy` will use for this app.
 pub fn get_config_file_path() -> Result<PathBuf> {
+    if let Some(base) = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from) {
+        let dir = base.join("gman");
+        let yml = dir.join("config.yml");
+        let yaml = dir.join("config.yaml");
+        if yml.exists() || yaml.exists() {
+            return Ok(if yml.exists() { yml } else { yaml });
+        }
+        // Prefer .yml if creating anew
+        return Ok(dir.join("config.yml"));
+    }
     Ok(confy::get_configuration_file_path("gman", "config")?)
 }
