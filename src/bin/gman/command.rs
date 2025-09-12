@@ -1,3 +1,4 @@
+#[cfg(not(windows))]
 use std::borrow::Cow;
 use std::ffi::OsStr;
 use std::process::Command;

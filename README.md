@@ -177,6 +177,15 @@ $HOME/Library/Application Support/rs.gman/config.yml
 %APPDATA%/Roaming/gman/config.yml
 ```
 
+### Discover paths (helpful for debugging)
+
+You can ask `gman` where it writes its log file and where it expects the config file to live:
+
+```shell
+gman --show-log-path
+gman --show-config-path
+```
+
 ### Default Configuration
 
 `gman` supports multiple providers. Select one as the default and then list provider configurations.

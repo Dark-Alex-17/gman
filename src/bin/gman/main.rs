@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use clap::Subcommand;
 use crossterm::execute;
 use crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
-use gman::config::load_config;
+use gman::config::{get_config_file_path, load_config};
 use heck::ToSnakeCase;
 use std::io::{self, IsTerminal, Read, Write};
 use std::panic::PanicHookInfo;
@@ -31,6 +31,7 @@ enum OutputFormat {
 	author = crate_authors!(),
 	version = crate_version!(),
 	about = crate_description!(),
+	arg_required_else_help = true,
 	help_template = "\
 {before-help}{name} {version}
 {author-with-newline}
@@ -56,8 +57,16 @@ struct Cli {
     #[arg(long, global = true)]
     dry_run: bool,
 
+    /// Print the log file path and exit
+    #[arg(long, global = true)]
+    show_log_path: bool,
+
+    /// Print the config file path and exit
+    #[arg(long, global = true)]
+    show_config_path: bool,
+
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -115,11 +124,21 @@ fn main() -> Result<()> {
         panic_hook(info);
     }));
     let cli = Cli::parse();
+
+    if cli.show_log_path {
+        println!("{}", utils::get_log_path().display());
+        return Ok(());
+    }
+    if cli.show_config_path {
+        println!("{}", get_config_file_path()?.display());
+        return Ok(());
+    }
+
     let config = load_config()?;
     let mut provider_config = config.extract_provider_config(cli.provider.clone())?;
     let secrets_provider = provider_config.extract_provider();
 
-    match cli.command {
+    match cli.command.with_context(|| "no command provided")? {
         Commands::Add { name } => {
             let plaintext =
                 read_all_stdin().with_context(|| "unable to read plaintext from stdin")?;
