@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Context};
+use anyhow::{Context, anyhow, bail};
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -6,20 +6,20 @@ use std::{env, fs};
 use zeroize::Zeroize;
 
 use crate::config::Config;
-use crate::providers::git_sync::{repo_name_from_url, sync_and_push, SyncOpts};
 use crate::providers::SecretProvider;
+use crate::providers::git_sync::{SyncOpts, repo_name_from_url, sync_and_push};
 use crate::{
     ARGON_M_COST_KIB, ARGON_P, ARGON_T_COST, HEADER, KDF, KEY_LEN, NONCE_LEN, SALT_LEN, VERSION,
 };
 use anyhow::Result;
 use argon2::{Algorithm, Argon2, Params, Version};
-use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use chacha20poly1305::aead::rand_core::RngCore;
 use chacha20poly1305::{
-    aead::{Aead, KeyInit, OsRng},
     Key, XChaCha20Poly1305, XNonce,
+    aead::{Aead, KeyInit, OsRng},
 };
-use dialoguer::{theme, Input};
+use dialoguer::{Input, theme};
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;

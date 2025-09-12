@@ -7,7 +7,7 @@ mod git_sync;
 pub mod local;
 
 use crate::providers::local::LocalProvider;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use validator::{Validate, ValidationErrors};

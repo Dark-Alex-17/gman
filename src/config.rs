@@ -137,7 +137,7 @@ impl ProviderConfig {
     /// ```no_run
     /// # use gman::config::ProviderConfig;
     /// let mut provider_config = ProviderConfig::default();
-		/// let provider = provider_config.extract_provider();
+    /// let provider = provider_config.extract_provider();
     /// println!("using provider: {}", provider.name());
     /// ```
     pub fn extract_provider(&mut self) -> &mut dyn SecretProvider {

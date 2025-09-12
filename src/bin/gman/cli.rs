@@ -1,5 +1,5 @@
 use crate::command::preview_command;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use futures::future::join_all;
 use gman::config::{Config, RunConfig};
 use gman::providers::SecretProvider;

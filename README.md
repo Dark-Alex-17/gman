@@ -90,7 +90,8 @@ gman aws sts get-caller-identity
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Providers](#providers)
-  - [Provider: `local`](#provider-local)
+  - [Local](#provider-local)
+  - [AWS Secrets Manager](#provider-aws_secrets_manager)
 - [Run Configurations](#run-configurations)
   - [Environment Variable Secret Injection](#environment-variable-secret-injection)
   - [Inject Secrets via Command-Line Flags](#inject-secrets-via-command-line-flags)
@@ -237,18 +238,17 @@ documented and added without breaking existing setups. The following table shows
 | 🚫     | Won't Add |
 
 
-| Provider Name                                                                                                            | Status | Configuration Docs       |  Comments                                  |
-|--------------------------------------------------------------------------------------------------------------------------|--------|--------------------------|--------------------------------------------|
-| `local`                                                                                                                  | ✅      | [Local](#provider-local) |                                            |
-| [`aws_secrets_manager`](https://docs.aws.amazon.com/secretsmanager/latest/userguide/intro.html)                          | 🕒     |                          |                                            |
-| [`aws_ssm_parameter_store`](https://docs.aws.amazon.com/secretsmanager/latest/userguide/integrating_parameterstore.html) | 🕒     |                          |                                            |
-| [`hashicorp_vault`](https://www.hashicorp.com/en/products/vault)                                                         | 🕒     |                          |                                            |
-| [`azure_key_vault`](https://azure.microsoft.com/en-us/products/key-vault/)                                               | 🕒     |                          |                                            |
-| [`gcp_secret_manager`](https://cloud.google.com/security/products/secret-manager?hl=en)                                  | 🕒     |                          |                                            |
-| [`1password`](https://1password.com/)                                                                                    | 🕒     |                          |                                            |
-| [`bitwarden`](https://bitwarden.com/)                                                                                    | 🕒     |                          |                                            |
-| [`dashlane`](https://www.dashlane.com/)                                                                                  | 🕒     |                          | Waiting for CLI support for adding secrets |
-| [`lastpass`](https://www.lastpass.com/)                                                                                  | 🕒     |                          |                                            |
+| Provider Name                                                                                                            | Status | Configuration Docs                                   | Comments                                   |
+|--------------------------------------------------------------------------------------------------------------------------|--------|------------------------------------------------------|--------------------------------------------|
+| `local`                                                                                                                  | ✅      | [Local](#provider-local)                             |                                            |
+| [`aws_secrets_manager`](https://docs.aws.amazon.com/secretsmanager/latest/userguide/intro.html)                          | ✅      | [AWS Secrets Manager](#provider-aws_secrets_manager) |                                            |
+| [`hashicorp_vault`](https://www.hashicorp.com/en/products/vault)                                                         | 🕒     |                                                      |                                            |
+| [`azure_key_vault`](https://azure.microsoft.com/en-us/products/key-vault/)                                               | 🕒     |                                                      |                                            |
+| [`gcp_secret_manager`](https://cloud.google.com/security/products/secret-manager?hl=en)                                  | 🕒     |                                                      |                                            |
+| [`1password`](https://1password.com/)                                                                                    | 🕒     |                                                      |                                            |
+| [`bitwarden`](https://bitwarden.com/)                                                                                    | 🕒     |                                                      |                                            |
+| [`dashlane`](https://www.dashlane.com/)                                                                                  | 🕒     |                                                      | Waiting for CLI support for adding secrets |
+| [`lastpass`](https://www.lastpass.com/)                                                                                  | 🕒     |                                                      |                                            |
 
 ### Provider: `local`
 
@@ -402,6 +402,35 @@ Then, all you need to do to run `managarr` with the secrets injected is:
 ```shell
 gman managarr
 ```
+
+### Provider: `aws_secrets_manager`
+
+The `aws_secrets_manager` provider stores secrets in AWS Secrets Manager using the official AWS Rust SDK.
+
+- Requires two fields: `aws_profile` and `aws_region`.
+- Uses the shared AWS config/credentials files under the named profile to authenticate.
+- Implements: `get`, `set`, `update`, `delete`, and `list`.
+
+Configuration example:
+
+```yaml
+default_provider: aws
+providers:
+  - name: aws
+    type: aws_secrets_manager
+    aws_profile: default     # Name from your ~/.aws/config and ~/.aws/credentials
+    aws_region: us-east-1    # Region where your secrets live
+```
+
+Important notes:
+- Deletions are immediate: the provider calls `DeleteSecret` with `force_delete_without_recovery = true`, so there is no
+  recovery window. If you need a recovery window, do not delete via `gman`.
+- `add` uses `CreateSecret`. If the secret already exists, AWS returns an error. Use `update` to change an existing 
+  secret value.
+- IAM permissions: ensure the configured principal has `secretsmanager:GetSecretValue`, `CreateSecret`, `UpdateSecret`, 
+  `DeleteSecret`, and `ListSecrets` for the relevant region and ARNs.
+- Credential resolution: the provider explicitly selects the given `aws_profile` and `aws_region` via the AWS config 
+  loader; it does not fall back to other profiles or env-only defaults.
 
 ## Detailed Usage
 

@@ -45,49 +45,51 @@ impl SecretProvider for AwsSecretsManagerProvider {
 
     async fn get_secret(&self, key: &str) -> Result<String> {
         self.get_client()
-					.await?
-					.get_secret_value()
-					.secret_id(key)
-					.send()
-					.await?
-					.secret_string
-					.with_context(|| format!("Secret '{key}' not found"))
+            .await?
+            .get_secret_value()
+            .secret_id(key)
+            .send()
+            .await?
+            .secret_string
+            .with_context(|| format!("Secret '{key}' not found"))
     }
 
     async fn set_secret(&self, key: &str, value: &str) -> Result<()> {
         self.get_client()
-					.await?
-					.create_secret()
-					.name(key)
-					.secret_string(value)
-					.send()
-					.await.with_context(|| format!("Failed to set secret '{key}'"))?;
+            .await?
+            .create_secret()
+            .name(key)
+            .secret_string(value)
+            .send()
+            .await
+            .with_context(|| format!("Failed to set secret '{key}'"))?;
 
-				Ok(())
+        Ok(())
     }
 
-	async fn update_secret(&self, key: &str, value: &str) -> Result<()> {
-		self.get_client()
-			.await?
-			.update_secret()
-			.secret_id(key)
-			.secret_string(value)
-			.send()
-			.await.with_context(|| format!("Failed to update secret '{key}'"))?;
-
-		Ok(())
-	}
-
-	async fn delete_secret(&self, key: &str) -> Result<()> {
+    async fn update_secret(&self, key: &str, value: &str) -> Result<()> {
         self.get_client()
-						.await?
-						.delete_secret()
-						.secret_id(key)
-						.force_delete_without_recovery(true)
-						.send()
-						.await
-						.with_context(|| format!("Failed to delete secret '{key}'"))?;
-				Ok(())
+            .await?
+            .update_secret()
+            .secret_id(key)
+            .secret_string(value)
+            .send()
+            .await
+            .with_context(|| format!("Failed to update secret '{key}'"))?;
+
+        Ok(())
+    }
+
+    async fn delete_secret(&self, key: &str) -> Result<()> {
+        self.get_client()
+            .await?
+            .delete_secret()
+            .secret_id(key)
+            .force_delete_without_recovery(true)
+            .send()
+            .await
+            .with_context(|| format!("Failed to delete secret '{key}'"))?;
+        Ok(())
     }
 
     async fn list_secrets(&self) -> Result<Vec<String>> {

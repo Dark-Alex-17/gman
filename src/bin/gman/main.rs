@@ -1,12 +1,12 @@
 use clap::{
-    crate_authors, crate_description, crate_name, crate_version, CommandFactory, Parser, ValueEnum,
+    CommandFactory, Parser, ValueEnum, crate_authors, crate_description, crate_name, crate_version,
 };
 use std::ffi::OsString;
 
 use anyhow::{Context, Result};
 use clap::Subcommand;
 use crossterm::execute;
-use crossterm::terminal::{disable_raw_mode, LeaveAlternateScreen};
+use crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
 use gman::config::{get_config_file_path, load_config};
 use std::io::{self, IsTerminal, Read, Write};
 use std::panic::PanicHookInfo;
