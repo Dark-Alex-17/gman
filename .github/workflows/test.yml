@@ -44,11 +44,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Ensure TMPDIR is valid for MacOS
-        if: runner.os == 'macOS'
-        run: |
-          echo "TMPDIR=${{ runner.temp }}" >> $GITHUB_ENV
-
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
