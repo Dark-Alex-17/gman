@@ -169,7 +169,7 @@ $HOME/.config/gman/config.yml
 
 ### Mac
 ```
-$HOME/Library/Application Support/gman/config.yml
+$HOME/Library/Application Support/rs.gman/config.yml
 ```
 
 ### Windows
