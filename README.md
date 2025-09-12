@@ -98,6 +98,66 @@ cargo install gman
 cargo install --locked gman
 ```
 
+### Homebrew (Mac/Linux)
+To install G-Man from Homebrew, install the `gman` tap. Then you'll be able to install `gman`:
+
+```shell
+brew tap Dark-Alex-17/gman
+brew install gman
+
+# If you need to be more specific, use:
+brew install Dark-Alex-17/gman/gman
+```
+
+To upgrade `gman` using Homebrew:
+
+```shell
+brew upgrade gman
+```
+
+### Chocolatey (Windows)
+The G-Man Chocolatey package is located [here](https://community.chocolatey.org/packages/gman). Please note that validation
+of Chocolatey packages take quite some time, and thus the package may not be available immediately after a new release.
+
+```powershell
+choco install gman
+
+# Some newer releases may require a version number, so you can specify it like so:
+choco install gman --version=0.1.0
+```
+
+To upgrade to the latest and greatest version of G-Man:
+```powershell
+choco upgrade gman
+
+# To upgrade to a specific version:
+choco upgrade gman --version=0.1.0
+```
+
+### Manual
+Binaries are available on the [releases](https://github.com/Dark-Alex-17/gman/releases) page for the following platforms:
+
+| Platform       | Architecture(s)            |
+|----------------|----------------------------|
+| macOS          | x86_64, arm64              |
+| Linux GNU/MUSL | x86_64,armv6,armv7,aarch64 |
+| Windows        | x86_64,aarch64             |
+
+#### Windows Instructions
+To use a binary from the releases page on Windows, do the following:
+
+1. Download the latest [binary](https://github.com/Dark-Alex-17/gman/releases) for your OS.
+2. Use 7-Zip or TarTool to unpack the Tar file.
+3. Run the executable `gman.exe`!
+
+#### Linux/MacOS Instructions
+To use a binary from the releases page on Linux/MacOS, do the following:
+
+1. Download the latest [binary](https://github.com/Dark-Alex-17/gman/releases) for your OS.
+2. `cd` to the directory where you downloaded the binary.
+3. Extract the binary with `tar -C /usr/local/bin -xzf gman-<arch>.tar.gz` (Note: This may require `sudo`)
+4. Now you can run `gman`!
+
 ## Configuration
 
 `gman` reads a YAML configuration file located at an OS-specific path:
@@ -119,7 +179,7 @@ $HOME/Library/Application Support/gman/config.yml
 
 ### Default Configuration
 
-gman supports multiple providers. Select one as the default and then list provider configurations.
+`gman` supports multiple providers. Select one as the default and then list provider configurations.
 
 ```yaml
 ---
