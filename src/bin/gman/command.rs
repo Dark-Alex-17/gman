@@ -119,7 +119,7 @@ mod tests {
         if cfg!(unix) {
             assert_str_eq!(preview, "MY_VAR=my_value echo 'hello world'");
         } else if cfg!(windows) {
-            assert_str_eq!(preview, "set MY_VAR=my_value && \"echo\" \"hello world\"");
+            assert_str_eq!(preview, "set MY_VAR=my_value && echo \"hello world\"");
         }
     }
 }
