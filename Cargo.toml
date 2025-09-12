@@ -1,6 +1,6 @@
 [package]
 name = "gman"
-version = "0.2.0"
+version = "0.1.0"
 edition = "2024"
 authors = ["Alex Clarke <alex.j.tusa@gmail.com>"]
 description = "Universal secret management and injection tool"
@@ -49,6 +49,9 @@ indoc = "2.0.6"
 regex = "1.11.2"
 serde_yaml = "0.9.34"
 tempfile = "3.22.0"
+aws-sdk-secretsmanager = "1.88.0"
+tokio = { version = "1.47.1", features = ["full"] }
+aws-config = { version = "1.8.6", features = ["behavior-version-latest"] }
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"

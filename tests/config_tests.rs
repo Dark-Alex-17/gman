@@ -1,8 +1,6 @@
 #[cfg(test)]
 mod tests {
     use gman::config::{Config, ProviderConfig, RunConfig};
-    use gman::providers::SupportedProvider;
-    use gman::providers::local::LocalProvider;
     use pretty_assertions::assert_eq;
 
     use validator::Validate;
@@ -162,64 +160,10 @@ mod tests {
     }
 
     #[test]
-    fn test_provider_config_valid() {
-        let config = ProviderConfig {
-            name: Some("local-test".to_string()),
-            provider_type: SupportedProvider::Local(LocalProvider),
-            password_file: None,
-            git_branch: None,
-            git_remote_url: None,
-            git_user_name: None,
-            git_user_email: Some("test@example.com".to_string()),
-            git_executable: None,
-        };
-
-        assert!(config.validate().is_ok());
-    }
-
-    #[test]
-    fn test_provider_config_invalid_email() {
-        let config = ProviderConfig {
-            name: Some("local-test".to_string()),
-            provider_type: SupportedProvider::Local(LocalProvider),
-            password_file: None,
-            git_branch: None,
-            git_remote_url: None,
-            git_user_name: None,
-            git_user_email: Some("test".to_string()),
-            git_executable: None,
-        };
-
-        assert!(config.validate().is_err());
-    }
-
-    #[test]
-    fn test_provider_config_missing_name() {
-        let config = ProviderConfig {
-            name: None,
-            provider_type: SupportedProvider::Local(LocalProvider),
-            password_file: None,
-            git_branch: None,
-            git_remote_url: None,
-            git_user_name: None,
-            git_user_email: None,
-            git_executable: None,
-        };
-
-        assert!(config.validate().is_err());
-    }
-
-    #[test]
     fn test_provider_config_default() {
         let config = ProviderConfig::default();
 
         assert_eq!(config.name, Some("local".to_string()));
-        assert_eq!(config.git_user_email, None);
-        assert_eq!(config.password_file, Config::local_provider_password_file());
-        assert_eq!(config.git_branch, Some("main".into()));
-        assert_eq!(config.git_remote_url, None);
-        assert_eq!(config.git_user_name, None);
-        assert_eq!(config.git_executable, None);
     }
 
     #[test]

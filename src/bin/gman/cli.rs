@@ -1,6 +1,6 @@
 use crate::command::preview_command;
 use anyhow::{Context, Result, anyhow};
-use gman::config::{Config, ProviderConfig, RunConfig};
+use gman::config::{Config, RunConfig};
 use gman::providers::SecretProvider;
 use heck::ToSnakeCase;
 use log::{debug, error};
@@ -15,9 +15,8 @@ const ARG_FORMAT_PLACEHOLDER_KEY: &str = "{{key}}";
 const ARG_FORMAT_PLACEHOLDER_VALUE: &str = "{{value}}";
 
 pub fn wrap_and_run_command(
-    secrets_provider: Box<dyn SecretProvider>,
+    secrets_provider: &mut dyn SecretProvider,
     config: &Config,
-    provider_config: &ProviderConfig,
     tokens: Vec<OsString>,
     profile_name: Option<String>,
     dry_run: bool,
@@ -51,7 +50,7 @@ pub fn wrap_and_run_command(
                     run_config_profile_name
                 );
                 secrets_provider
-                    .get_secret(provider_config, key.to_snake_case().to_uppercase().as_str())
+                    .get_secret(key.to_snake_case().to_uppercase().as_str())
                     .ok()
                     .map_or_else(
                         || {
@@ -254,7 +253,7 @@ pub fn parse_args(
 mod tests {
     use super::*;
     use crate::cli::generate_files_secret_injections;
-    use gman::config::{Config, ProviderConfig, RunConfig};
+    use gman::config::{Config, RunConfig};
     use pretty_assertions::{assert_eq, assert_str_eq};
     use std::collections::HashMap;
     use std::ffi::OsString;
@@ -264,16 +263,16 @@ mod tests {
         fn name(&self) -> &'static str {
             "Dummy"
         }
-        fn get_secret(&self, _config: &ProviderConfig, key: &str) -> Result<String> {
+        fn get_secret(&self, key: &str) -> Result<String> {
             Ok(format!("{}_VAL", key))
         }
-        fn set_secret(&self, _config: &ProviderConfig, _key: &str, _value: &str) -> Result<()> {
+        fn set_secret(&self, _key: &str, _value: &str) -> Result<()> {
             Ok(())
         }
-        fn delete_secret(&self, _config: &ProviderConfig, _key: &str) -> Result<()> {
+        fn delete_secret(&self, _key: &str) -> Result<()> {
             Ok(())
         }
-        fn sync(&self, _config: &mut ProviderConfig) -> Result<()> {
+        fn sync(&mut self) -> Result<()> {
             Ok(())
         }
     }
@@ -345,10 +344,10 @@ mod tests {
     #[test]
     fn test_wrap_and_run_command_no_profile() {
         let cfg = Config::default();
-        let provider_cfg = ProviderConfig::default();
-        let prov: Box<dyn SecretProvider> = Box::new(DummyProvider);
+        let mut dummy = DummyProvider;
+        let prov: &mut dyn SecretProvider = &mut dummy;
         let tokens = vec![OsString::from("echo"), OsString::from("hi")];
-        let err = wrap_and_run_command(prov, &cfg, &provider_cfg, tokens, None, true).unwrap_err();
+        let err = wrap_and_run_command(prov, &cfg, tokens, None, true).unwrap_err();
         assert!(err.to_string().contains("No run profile found"));
     }
 
@@ -367,13 +366,13 @@ mod tests {
             run_configs: Some(vec![run_cfg]),
             ..Config::default()
         };
-        let provider_cfg = ProviderConfig::default();
-        let prov: Box<dyn SecretProvider> = Box::new(DummyProvider);
+        let mut dummy = DummyProvider;
+        let prov: &mut dyn SecretProvider = &mut dummy;
 
         // Capture stderr for dry_run preview
         let tokens = vec![OsString::from("echo"), OsString::from("hello")];
         // Best-effort: ensure function does not error under dry_run
-        let res = wrap_and_run_command(prov, &cfg, &provider_cfg, tokens, None, true);
+        let res = wrap_and_run_command(prov, &cfg, tokens, None, true);
         assert!(res.is_ok());
         // Not asserting output text to keep test platform-agnostic
     }

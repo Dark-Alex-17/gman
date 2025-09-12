@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::{env, fs};
 use zeroize::Zeroize;
 
-use crate::config::ProviderConfig;
+use crate::config::Config;
 use crate::providers::SecretProvider;
 use crate::providers::git_sync::{SyncOpts, repo_name_from_url, sync_and_push};
 use crate::{
@@ -21,27 +21,12 @@ use chacha20poly1305::{
 };
 use dialoguer::{Input, theme};
 use log::{debug, error};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use serde_with::skip_serializing_none;
 use theme::ColorfulTheme;
 use validator::Validate;
 
-/// Configuration for the local file-based provider.
-#[derive(Debug, Clone)]
-pub struct LocalProviderConfig {
-    pub vault_path: String,
-}
-
-impl Default for LocalProviderConfig {
-    fn default() -> Self {
-        Self {
-            vault_path: dirs::home_dir()
-                .map(|p| p.join(".gman_vault"))
-                .and_then(|p| p.to_str().map(|s| s.to_string()))
-                .unwrap_or_else(|| ".gman_vault".into()),
-        }
-    }
-}
-
+#[skip_serializing_none]
 /// File-based vault provider with optional Git sync.
 ///
 /// This provider stores encrypted envelopes in a per-user configuration
@@ -54,37 +39,59 @@ impl Default for LocalProviderConfig {
 /// use gman::providers::SecretProvider;
 /// use gman::config::Config;
 ///
-/// let provider = LocalProvider;
+/// let provider = LocalProvider::default();
 /// let cfg = Config::default();
 /// // Will prompt for a password when reading/writing secrets unless a
 /// // password file is configured.
 /// // provider.set_secret(&cfg, "MY_SECRET", "value")?;
 /// # Ok::<(), anyhow::Error>(())
 /// ```
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
-pub struct LocalProvider;
+#[derive(Debug, Clone, Validate, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LocalProvider {
+    pub password_file: Option<PathBuf>,
+    pub git_branch: Option<String>,
+    pub git_remote_url: Option<String>,
+    pub git_user_name: Option<String>,
+    #[validate(email)]
+    pub git_user_email: Option<String>,
+    pub git_executable: Option<PathBuf>,
+}
+
+impl Default for LocalProvider {
+    fn default() -> Self {
+        Self {
+            password_file: Config::local_provider_password_file(),
+            git_branch: Some("main".into()),
+            git_remote_url: None,
+            git_user_name: None,
+            git_user_email: None,
+            git_executable: None,
+        }
+    }
+}
 
 impl SecretProvider for LocalProvider {
     fn name(&self) -> &'static str {
         "LocalProvider"
     }
 
-    fn get_secret(&self, config: &ProviderConfig, key: &str) -> Result<String> {
-        let vault_path = active_vault_path(config)?;
+    fn get_secret(&self, key: &str) -> Result<String> {
+        let vault_path = self.active_vault_path()?;
         let vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
         let envelope = vault
             .get(key)
             .with_context(|| format!("key '{key}' not found in the vault"))?;
 
-        let password = get_password(config)?;
+        let password = self.get_password()?;
         let plaintext = decrypt_string(&password, envelope)?;
         drop(password);
 
         Ok(plaintext)
     }
 
-    fn set_secret(&self, config: &ProviderConfig, key: &str, value: &str) -> Result<()> {
-        let vault_path = active_vault_path(config)?;
+    fn set_secret(&self, key: &str, value: &str) -> Result<()> {
+        let vault_path = self.active_vault_path()?;
         let mut vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
         if vault.contains_key(key) {
             error!(
@@ -93,7 +100,7 @@ impl SecretProvider for LocalProvider {
             bail!("key '{key}' already exists");
         }
 
-        let password = get_password(config)?;
+        let password = self.get_password()?;
         let envelope = encrypt_string(&password, value)?;
         drop(password);
 
@@ -102,11 +109,11 @@ impl SecretProvider for LocalProvider {
         store_vault(&vault_path, &vault).with_context(|| "failed to save secret to the vault")
     }
 
-    fn update_secret(&self, config: &ProviderConfig, key: &str, value: &str) -> Result<()> {
-        let vault_path = active_vault_path(config)?;
+    fn update_secret(&self, key: &str, value: &str) -> Result<()> {
+        let vault_path = self.active_vault_path()?;
         let mut vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
 
-        let password = get_password(config)?;
+        let password = self.get_password()?;
         let envelope = encrypt_string(&password, value)?;
         drop(password);
 
@@ -125,8 +132,8 @@ impl SecretProvider for LocalProvider {
         store_vault(&vault_path, &vault).with_context(|| "failed to save secret to the vault")
     }
 
-    fn delete_secret(&self, config: &ProviderConfig, key: &str) -> Result<()> {
-        let vault_path = active_vault_path(config)?;
+    fn delete_secret(&self, key: &str) -> Result<()> {
+        let vault_path = self.active_vault_path()?;
         let mut vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
         if !vault.contains_key(key) {
             error!("Key '{key}' does not exist in the vault.");
@@ -137,18 +144,18 @@ impl SecretProvider for LocalProvider {
         store_vault(&vault_path, &vault).with_context(|| "failed to save secret to the vault")
     }
 
-    fn list_secrets(&self, config: &ProviderConfig) -> Result<Vec<String>> {
-        let vault_path = active_vault_path(config)?;
+    fn list_secrets(&self) -> Result<Vec<String>> {
+        let vault_path = self.active_vault_path()?;
         let vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
         let keys: Vec<String> = vault.keys().cloned().collect();
 
         Ok(keys)
     }
 
-    fn sync(&self, config: &mut ProviderConfig) -> Result<()> {
+    fn sync(&mut self) -> Result<()> {
         let mut config_changed = false;
 
-        if config.git_branch.is_none() {
+        if self.git_branch.is_none() {
             config_changed = true;
             debug!("Prompting user to set git_branch in config for sync");
             let branch: String = Input::with_theme(&ColorfulTheme::default())
@@ -156,18 +163,18 @@ impl SecretProvider for LocalProvider {
                 .default("main".into())
                 .interact_text()?;
 
-            config.git_branch = Some(branch);
+            self.git_branch = Some(branch);
         }
 
-        if config.git_remote_url.is_none() {
+        if self.git_remote_url.is_none() {
             config_changed = true;
             debug!("Prompting user to set git_remote in config for sync");
             let remote: String = Input::with_theme(&ColorfulTheme::default())
                 .with_prompt("Enter remote git URL to sync with")
                 .validate_with(|s: &String| {
-                    ProviderConfig {
+                    LocalProvider {
                         git_remote_url: Some(s.clone()),
-                        ..ProviderConfig::default()
+                        ..LocalProvider::default()
                     }
                     .validate()
                     .map(|_| ())
@@ -175,24 +182,63 @@ impl SecretProvider for LocalProvider {
                 })
                 .interact_text()?;
 
-            config.git_remote_url = Some(remote);
+            self.git_remote_url = Some(remote);
         }
 
         if config_changed {
             debug!("Saving updated config");
-            confy::store("gman", "config", &config)
+            confy::store("gman", "config", &self)
                 .with_context(|| "failed to save updated config")?;
         }
 
         let sync_opts = SyncOpts {
-            remote_url: &config.git_remote_url,
-            branch: &config.git_branch,
-            user_name: &config.git_user_name,
-            user_email: &config.git_user_email,
-            git_executable: &config.git_executable,
+            remote_url: &self.git_remote_url,
+            branch: &self.git_branch,
+            user_name: &self.git_user_name,
+            user_email: &self.git_user_email,
+            git_executable: &self.git_executable,
         };
 
         sync_and_push(&sync_opts)
+    }
+}
+
+impl LocalProvider {
+    fn repo_dir_for_config(&self) -> Result<Option<PathBuf>> {
+        if let Some(remote) = &self.git_remote_url {
+            let name = repo_name_from_url(remote);
+            let dir = base_config_dir()?.join(format!(".{}", name));
+            Ok(Some(dir))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn active_vault_path(&self) -> Result<PathBuf> {
+        if let Some(dir) = self.repo_dir_for_config()?
+            && dir.exists()
+        {
+            return Ok(dir.join("vault.yml"));
+        }
+
+        default_vault_path()
+    }
+
+    fn get_password(&self) -> Result<SecretString> {
+        if let Some(password_file) = &self.password_file {
+            let password = SecretString::new(
+                fs::read_to_string(password_file)
+                    .with_context(|| format!("failed to read password file {:?}", password_file))?
+                    .trim()
+                    .to_string()
+                    .into(),
+            );
+
+            Ok(password)
+        } else {
+            let password = rpassword::prompt_password("\nPassword: ")?;
+            Ok(SecretString::new(password.into()))
+        }
     }
 }
 
@@ -211,26 +257,6 @@ fn base_config_dir() -> Result<PathBuf> {
         .parent()
         .map(Path::to_path_buf)
         .ok_or_else(|| anyhow!("Failed to determine config dir"))
-}
-
-fn repo_dir_for_config(config: &ProviderConfig) -> Result<Option<PathBuf>> {
-    if let Some(remote) = &config.git_remote_url {
-        let name = repo_name_from_url(remote);
-        let dir = base_config_dir()?.join(format!(".{}", name));
-        Ok(Some(dir))
-    } else {
-        Ok(None)
-    }
-}
-
-fn active_vault_path(config: &ProviderConfig) -> Result<PathBuf> {
-    if let Some(dir) = repo_dir_for_config(config)?
-        && dir.exists()
-    {
-        return Ok(dir.join("vault.yml"));
-    }
-
-    default_vault_path()
 }
 
 fn load_vault(path: &Path) -> Result<HashMap<String, String>> {
@@ -394,23 +420,6 @@ fn decrypt_string(password: &SecretString, envelope: &str) -> Result<String> {
     Ok(s)
 }
 
-fn get_password(config: &ProviderConfig) -> Result<SecretString> {
-    if let Some(password_file) = &config.password_file {
-        let password = SecretString::new(
-            fs::read_to_string(password_file)
-                .with_context(|| format!("failed to read password file {:?}", password_file))?
-                .trim()
-                .to_string()
-                .into(),
-        );
-
-        Ok(password)
-    } else {
-        let password = rpassword::prompt_password("\nPassword: ")?;
-        Ok(SecretString::new(password.into()))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -448,11 +457,11 @@ mod tests {
         let dir = tempdir().unwrap();
         let file = dir.path().join("pw.txt");
         fs::write(&file, "secretpw\n").unwrap();
-        let cfg = ProviderConfig {
+        let provider = LocalProvider {
             password_file: Some(file),
-            ..ProviderConfig::default()
+            ..LocalProvider::default()
         };
-        let pw = get_password(&cfg).unwrap();
+        let pw = provider.get_password().unwrap();
         assert_eq!(pw.expose_secret(), "secretpw");
     }
 }

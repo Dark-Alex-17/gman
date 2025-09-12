@@ -116,7 +116,8 @@ enum Commands {
     },
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     if let Err(e) = log4rs::init_config(utils::init_logging_config()) {
         eprintln!("Failed to initialize logging: {e}");
     }
@@ -144,7 +145,7 @@ fn main() -> Result<()> {
                 read_all_stdin().with_context(|| "unable to read plaintext from stdin")?;
             let snake_case_name = name.to_snake_case().to_uppercase();
             secrets_provider
-                .set_secret(&provider_config, &snake_case_name, plaintext.trim_end())
+                .set_secret(&snake_case_name, plaintext.trim_end())
                 .map(|_| match cli.output {
                     Some(_) => (),
                     None => println!("✓ Secret '{snake_case_name}' added to the vault."),
@@ -153,7 +154,7 @@ fn main() -> Result<()> {
         Commands::Get { name } => {
             let snake_case_name = name.to_snake_case().to_uppercase();
             secrets_provider
-                .get_secret(&provider_config, &snake_case_name)
+                .get_secret(&snake_case_name)
                 .map(|secret| match cli.output {
                     Some(OutputFormat::Json) => {
                         let json_output = serde_json::json!({
@@ -175,7 +176,7 @@ fn main() -> Result<()> {
                 read_all_stdin().with_context(|| "unable to read plaintext from stdin")?;
             let snake_case_name = name.to_snake_case().to_uppercase();
             secrets_provider
-                .update_secret(&provider_config, &snake_case_name, plaintext.trim_end())
+                .update_secret(&snake_case_name, plaintext.trim_end())
                 .map(|_| match cli.output {
                     Some(_) => (),
                     None => println!("✓ Secret '{snake_case_name}' updated in the vault."),
@@ -183,16 +184,14 @@ fn main() -> Result<()> {
         }
         Commands::Delete { name } => {
             let snake_case_name = name.to_snake_case().to_uppercase();
-            secrets_provider
-                .delete_secret(&provider_config, &snake_case_name)
-                .map(|_| {
-                    if cli.output.is_none() {
-                        println!("✓ Secret '{snake_case_name}' deleted from the vault.")
-                    }
-                })?;
+            secrets_provider.delete_secret(&snake_case_name).map(|_| {
+                if cli.output.is_none() {
+                    println!("✓ Secret '{snake_case_name}' deleted from the vault.")
+                }
+            })?;
         }
         Commands::List {} => {
-            let secrets = secrets_provider.list_secrets(&provider_config)?;
+            let secrets = secrets_provider.list_secrets()?;
             if secrets.is_empty() {
                 match cli.output {
                     Some(OutputFormat::Json) => {
@@ -218,21 +217,14 @@ fn main() -> Result<()> {
             }
         }
         Commands::Sync {} => {
-            secrets_provider.sync(&mut provider_config).map(|_| {
+            secrets_provider.sync().map(|_| {
                 if cli.output.is_none() {
                     println!("✓ Secrets synchronized with remote")
                 }
             })?;
         }
         Commands::External(tokens) => {
-            wrap_and_run_command(
-                secrets_provider,
-                &config,
-                &provider_config,
-                tokens,
-                cli.profile,
-                cli.dry_run,
-            )?;
+            wrap_and_run_command(secrets_provider, &config, tokens, cli.profile, cli.dry_run)?;
         }
         Commands::Completions { shell } => {
             let mut cmd = Cli::command();
