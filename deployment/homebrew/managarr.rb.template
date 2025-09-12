@@ -1,24 +1,23 @@
 # Documentation: https://docs.brew.sh/Formula-Cookbook
 #                https://rubydoc.brew.sh/Formula
-class Managarr < Formula
-  desc "A fast and simple dashboard for Kubernetes written in Rust"
-  homepage "https://github.com/Dark-Alex-17/managarr"
+class GMan < Formula
+  desc "Universal command line credential management and injection tool"
+  homepage "https://github.com/Dark-Alex-17/gman"
   if OS.mac? and Hardware::CPU.arm?
-    url "https://github.com/Dark-Alex-17/managarr/releases/download/v$version/managarr-macos-arm64.tar.gz"
+    url "https://github.com/Dark-Alex-17/gman/releases/download/v$version/gman-macos-arm64.tar.gz"
     sha256 "$hash_mac_arm"
   elsif OS.mac? and Hardware::CPU.intel?
-    url "https://github.com/Dark-Alex-17/managarr/releases/download/v$version/managarr-macos.tar.gz"
+    url "https://github.com/Dark-Alex-17/gman/releases/download/v$version/gman-macos.tar.gz"
     sha256 "$hash_mac"
   else
-    url "https://github.com/Dark-Alex-17/managarr/releases/download/v$version/managarr-linux-musl.tar.gz"
+    url "https://github.com/Dark-Alex-17/gman/releases/download/v$version/gman-linux-musl.tar.gz"
     sha256 "$hash_linux"
   end
   version "$version"
   license "MIT"
 
   def install
-    bin.install "managarr"
-    ohai "You're done!  Run with \"managarr\""
-    ohai "For runtime flags, see \"managarr --help\""
+    bin.install "gman"
+    ohai "You're done! Get started with \"gman --help\""
   end
 end

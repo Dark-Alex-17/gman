@@ -19,31 +19,31 @@ This is a nuspec. It mostly adheres to https://docs.nuget.org/create/Nuspec-Refe
 <package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
   <metadata>
     <!-- == PACKAGE SPECIFIC SECTION == -->
-    <id>managarr</id>
+    <id>gman</id>
     <version>$version</version>
 
     <!-- == SOFTWARE SPECIFIC SECTION == -->
     <!-- This section is about the software itself -->
-    <title>Managarr</title>
+    <title>G-Man</title>
     <authors>Alex Clarke</authors>
-    <projectUrl>https://github.com/Dark-Alex-17/managarr</projectUrl>
-    <licenseUrl>https://github.com/Dark-Alex-17/managarr/blob/main/LICENSE</licenseUrl>
+    <projectUrl>https://github.com/Dark-Alex-17/gman</projectUrl>
+    <licenseUrl>https://github.com/Dark-Alex-17/gman/blob/main/LICENSE</licenseUrl>
     <requireLicenseAcceptance>true</requireLicenseAcceptance>
-    <projectSourceUrl>https://github.com/Dark-Alex-17/managarr</projectSourceUrl>
-    <docsUrl>https://github.com/Dark-Alex-17/managarr/blob/main/README.md</docsUrl>
-    <bugTrackerUrl>https://github.com/Dark-Alex-17/managarr/issues</bugTrackerUrl>
-    <tags>cli cross-platform terminal servarr tui sonarr radarr rust</tags>
-    <summary>A TUI and CLI for managing *arr servers.</summary>
+    <projectSourceUrl>https://github.com/Dark-Alex-17/gman</projectSourceUrl>
+    <docsUrl>https://github.com/Dark-Alex-17/gman/blob/main/README.md</docsUrl>
+    <bugTrackerUrl>https://github.com/Dark-Alex-17/gman/issues</bugTrackerUrl>
+    <tags>cli cross-platform terminal credential-management secret-management rust</tags>
+    <summary>Universal command line credential management and injection tool</summary>
     <description>
-    A TUI and CLI for managing *arr servers. Built with love in Rust!
+    Universal command line credential management and injection tool.
 
     **Usage**
-    To use, run `managarr` in a terminal.
+    To get started, run `gman --help` in a terminal.
     
-    For more [documentation and usage](https://github.com/Dark-Alex-17/managarr/blob/main/README.md), see the [official repo](https://github.com/Dark-Alex-17/managarr).
+    For more [documentation and usage](https://github.com/Dark-Alex-17/gman/blob/main/README.md), see the [official repo](https://github.com/Dark-Alex-17/gman).
     
     </description>
-    <releaseNotes>https://github.com/Dark-Alex-17/managarr/releases/tag/v$version/</releaseNotes>
+    <releaseNotes>https://github.com/Dark-Alex-17/gman/releases/tag/v$version/</releaseNotes>
   </metadata>
   <files>
     <!-- this section controls what actually gets packaged into the Chocolatey package -->
