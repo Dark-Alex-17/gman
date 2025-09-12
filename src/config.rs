@@ -25,7 +25,7 @@ use anyhow::Result;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-use serde_with::{skip_serializing_none, DisplayFromStr};
+use serde_with::{DisplayFromStr, skip_serializing_none};
 use std::borrow::Cow;
 use std::path::PathBuf;
 use validator::{Validate, ValidationError};
@@ -116,7 +116,7 @@ pub struct ProviderConfig {
     #[validate(required)]
     pub name: Option<String>,
     #[serde_as(as = "DisplayFromStr")]
-		#[serde(rename(deserialize = "type"))]
+    #[serde(rename(deserialize = "type"))]
     pub provider_type: SupportedProvider,
     pub password_file: Option<PathBuf>,
     pub git_branch: Option<String>,

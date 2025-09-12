@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
     use gman::config::{Config, ProviderConfig, RunConfig};
-    use gman::providers::local::LocalProvider;
     use gman::providers::SupportedProvider;
+    use gman::providers::local::LocalProvider;
     use pretty_assertions::assert_eq;
 
     use validator::Validate;
