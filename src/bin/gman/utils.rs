@@ -3,8 +3,8 @@ use log4rs::append::console::ConsoleAppender;
 use log4rs::append::file::FileAppender;
 use log4rs::config::{Appender, Root};
 use log4rs::encode::pattern::PatternEncoder;
-use std::{env, fs};
 use std::path::PathBuf;
+use std::{env, fs};
 
 pub fn init_logging_config() -> log4rs::Config {
     let encoder = Box::new(PatternEncoder::new(
