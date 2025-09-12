@@ -116,7 +116,7 @@ pub struct ProviderConfig {
     #[validate(required)]
     pub name: Option<String>,
     #[serde_as(as = "DisplayFromStr")]
-    #[serde(rename(deserialize = "type"))]
+    #[serde(rename = "type")]
     pub provider_type: SupportedProvider,
     pub password_file: Option<PathBuf>,
     pub git_branch: Option<String>,
