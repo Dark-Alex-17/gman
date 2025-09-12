@@ -27,8 +27,8 @@ use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use serde_with::{DisplayFromStr, skip_serializing_none};
 use std::borrow::Cow;
-use std::fs;
 use std::path::PathBuf;
+use std::{env, fs};
 use validator::{Validate, ValidationError};
 
 #[skip_serializing_none]
@@ -263,7 +263,7 @@ impl Config {
 /// println!("loaded config: {:?}", config);
 /// ```
 pub fn load_config() -> Result<Config> {
-    let xdg_path = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
+    let xdg_path = env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
 
     let mut config: Config = if let Some(base) = xdg_path.as_ref() {
         let app_dir = base.join("gman");
@@ -303,7 +303,7 @@ pub fn load_config() -> Result<Config> {
 
 /// Returns the configuration file path that `confy` will use for this app.
 pub fn get_config_file_path() -> Result<PathBuf> {
-    if let Some(base) = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from) {
+    if let Some(base) = env::var_os("XDG_CONFIG_HOME").map(PathBuf::from) {
         let dir = base.join("gman");
         let yml = dir.join("config.yml");
         let yaml = dir.join("config.yaml");

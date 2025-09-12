@@ -1,8 +1,8 @@
 use anyhow::{Context, anyhow, bail};
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
-use std::fs;
 use std::path::{Path, PathBuf};
+use std::{env, fs};
 use zeroize::Zeroize;
 
 use crate::config::ProviderConfig;
@@ -197,6 +197,12 @@ impl SecretProvider for LocalProvider {
 }
 
 fn default_vault_path() -> Result<PathBuf> {
+    let xdg_path = env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
+
+    if let Some(xdg) = xdg_path {
+        return Ok(xdg.join("gman").join("vault.yml"));
+    }
+
     confy::get_configuration_file_path("gman", "vault").with_context(|| "get config dir")
 }
 
