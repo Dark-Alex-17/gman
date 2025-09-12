@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
     use gman::config::{Config, ProviderConfig, RunConfig};
-    use gman::providers::SupportedProvider;
     use gman::providers::local::LocalProvider;
+    use gman::providers::SupportedProvider;
     use pretty_assertions::assert_eq;
 
     use validator::Validate;
@@ -165,7 +165,7 @@ mod tests {
     fn test_provider_config_valid() {
         let config = ProviderConfig {
             name: Some("local-test".to_string()),
-            provider: SupportedProvider::Local(LocalProvider),
+            provider_type: SupportedProvider::Local(LocalProvider),
             password_file: None,
             git_branch: None,
             git_remote_url: None,
@@ -181,7 +181,7 @@ mod tests {
     fn test_provider_config_invalid_email() {
         let config = ProviderConfig {
             name: Some("local-test".to_string()),
-            provider: SupportedProvider::Local(LocalProvider),
+            provider_type: SupportedProvider::Local(LocalProvider),
             password_file: None,
             git_branch: None,
             git_remote_url: None,
@@ -197,7 +197,7 @@ mod tests {
     fn test_provider_config_missing_name() {
         let config = ProviderConfig {
             name: None,
-            provider: SupportedProvider::Local(LocalProvider),
+            provider_type: SupportedProvider::Local(LocalProvider),
             password_file: None,
             git_branch: None,
             git_remote_url: None,

@@ -24,7 +24,7 @@ fn write_yaml_config(xdg_config_home: &Path, password_file: &Path, run_profile: 
             r#"default_provider: local
 providers:
   - name: local
-    provider: local
+    type: local
     password_file: {}
 run_configs:
   - name: {}
@@ -38,7 +38,7 @@ run_configs:
             r#"default_provider: local
 providers:
   - name: local
-    provider: local
+    type: local
     password_file: {}
 "#,
             password_file.display()

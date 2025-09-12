@@ -25,7 +25,7 @@ use anyhow::Result;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-use serde_with::{DisplayFromStr, skip_serializing_none};
+use serde_with::{skip_serializing_none, DisplayFromStr};
 use std::borrow::Cow;
 use std::path::PathBuf;
 use validator::{Validate, ValidationError};
@@ -107,8 +107,8 @@ fn flags_or_files(run_config: &RunConfig) -> Result<(), ValidationError> {
 /// use gman::providers::local::LocalProvider;
 /// use validator::Validate;
 ///
-/// let provider = SupportedProvider::Local(LocalProvider);
-/// let provider_config = ProviderConfig { provider, ..Default::default() };
+/// let provider_type = SupportedProvider::Local(LocalProvider);
+/// let provider_config = ProviderConfig { provider_type, ..Default::default() };
 /// provider_config.validate().unwrap();
 /// ```
 #[derive(Debug, Clone, Validate, Serialize, Deserialize, PartialEq, Eq)]
@@ -116,7 +116,8 @@ pub struct ProviderConfig {
     #[validate(required)]
     pub name: Option<String>,
     #[serde_as(as = "DisplayFromStr")]
-    pub provider: SupportedProvider,
+		#[serde(rename(deserialize = "type"))]
+    pub provider_type: SupportedProvider,
     pub password_file: Option<PathBuf>,
     pub git_branch: Option<String>,
     pub git_remote_url: Option<String>,
@@ -130,7 +131,7 @@ impl Default for ProviderConfig {
     fn default() -> Self {
         Self {
             name: Some("local".into()),
-            provider: SupportedProvider::Local(LocalProvider),
+            provider_type: SupportedProvider::Local(LocalProvider),
             password_file: Config::local_provider_password_file(),
             git_branch: Some("main".into()),
             git_remote_url: None,
@@ -146,11 +147,11 @@ impl ProviderConfig {
     ///
     /// ```no_run
     /// # use gman::config::ProviderConfig;
-    /// let provider = ProviderConfig::default().extract_provider();
-    /// println!("using provider: {}", provider.name());
+    /// let provider_config = ProviderConfig::default().extract_provider();
+    /// println!("using provider: {}", provider_config.name());
     /// ```
     pub fn extract_provider(&self) -> Box<dyn SecretProvider> {
-        match &self.provider {
+        match &self.provider_type {
             SupportedProvider::Local(p) => {
                 debug!("Using local secret provider");
                 Box::new(*p)
@@ -171,8 +172,8 @@ impl ProviderConfig {
 /// use gman::providers::local::LocalProvider;
 /// use validator::Validate;
 ///
-/// let provider = SupportedProvider::Local(LocalProvider);
-/// let provider_config = ProviderConfig { provider, ..Default::default() };
+/// let provider_type = SupportedProvider::Local(LocalProvider);
+/// let provider_config = ProviderConfig { provider_type, ..Default::default() };
 /// let cfg = Config{ providers: vec![provider_config], ..Default::default() };
 /// cfg.validate().unwrap();
 /// ```
@@ -256,7 +257,7 @@ pub fn load_config() -> Result<Config> {
     config
         .providers
         .iter_mut()
-        .filter(|p| matches!(p.provider, SupportedProvider::Local(_)))
+        .filter(|p| matches!(p.provider_type, SupportedProvider::Local(_)))
         .for_each(|p| {
             if p.password_file.is_none()
                 && let Some(local_password_file) = Config::local_provider_password_file()

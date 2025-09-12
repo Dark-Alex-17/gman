@@ -126,7 +126,7 @@ gman supports multiple providers. Select one as the default and then list provid
 default_provider: local
 providers:
   - name: local
-    provider: local
+    type: local
     password_file: ~/.gman_password
     # Optional Git sync settings for the 'local' provider
     git_branch: main # Defaults to 'main'
@@ -191,7 +191,7 @@ For use across multiple systems, `gman` can sync with a remote Git repository (r
 default_provider: local
 providers:
   - name: local
-    provider: local
+    type: local
     git_branch: main
     git_remote_url: "git@github.com:my-user/gman-secrets.git"
     git_user_name: "Your Name"
@@ -397,13 +397,13 @@ Example: two AWS Secrets Manager providers named `lab` and `prod`.
 default_provider: prod
 providers:
   - name: lab
-    provider: local
+    type: local
     password_file: /home/user/.lab_gman_password
     git_branch: main
     git_remote_url: git@github.com:username/lab-vault.git
 
   - name: prod
-    provider: local
+    type: local
     password_file: /home/user/.prod_gman_password
     git_branch: main
     git_remote_url: git@github.com:username/prod-vault.git
