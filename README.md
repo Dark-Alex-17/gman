@@ -82,9 +82,24 @@ gman aws sts get-caller-identity
 - **Git sync for local vaults** to move secrets across machines
 - **Command wrapping** to inject secrets for any program
 - **Customizable run profiles** (env, flags, or files)
-- **Consistent secret naming**: input is snake_case; injected as UPPER_SNAKE_CASE
 - **Direct secret retrieval** via `gman get ...`
 - **Dry-run** to preview wrapped commands and secret injection
+
+## Table of Contents
+- [Features](#features)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Providers](#providers)
+  - [Provider: `local`](#provider-local)
+- [Run Configurations](#run-configurations)
+  - [Environment Variable Secret Injection](#environment-variable-secret-injection)
+  - [Inject Secrets via Command-Line Flags](#inject-secrets-via-command-line-flags)
+  - [Inject Secrets into Files](#inject-secrets-into-files)
+- [Detailed Usage](#detailed-usage)
+  - [Storing and Managing Secrets](#storing-and-managing-secrets)
+  - [Running Commands](#running-commands)
+  - [Multiple Providers and Switching](#multiple-providers-and-switching)
+- [Creator](#creator)
 
 ## Installation
 
@@ -302,8 +317,6 @@ will error out and report that it could not find the run config with that name.
 You can manually specify which run configuration to use with the `--profile` flag. Again, if no profile is found with 
 that name, `gman` will error out.
 
-#### Important: Secret names are always injected in `UPPER_SNAKE_CASE` format.
-
 ### Environment Variable Secret Injection
 
 By default, secrets are injected as environment variables. The two required fields are `name` and `secrets`.
@@ -313,8 +326,8 @@ By default, secrets are injected as environment variables. The two required fiel
 run_configs:
   - name: aws
     secrets:
-      - aws_access_key_id
-      - aws_secret_access_key
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
 ```
 When you run `gman aws ...`, `gman` will fetch these two secrets and expose them as environment variables to the `aws` 
 process.
@@ -335,8 +348,8 @@ This requires three additional fields: `flag`, `flag_position`, and `arg_format`
 run_configs:
   - name: docker
     secrets:
-      - my_app_api_key
-      - my_app_db_password
+      - MY_APP_API_KEY
+      - MY_APP_DB_PASSWORD
     flag: -e
     flag_position: 2 # In 'docker run ...', the flag comes after 'run', so position 2.
     arg_format: "{{key}}={{value}}"
@@ -363,8 +376,8 @@ specified secrets, it will leave the file unchanged.
 run_configs:
   - name: managarr
     secrets:
-      - radarr_api_key
-      - sonarr_api_key # Remember that secret names are always converted to UPPER_SNAKE_CASE
+      - RADARR_API_KEY
+      - SONARR_API_KEY
     files:
       - /home/user/.config/managarr/config.yml
 ```
@@ -381,7 +394,7 @@ sonarr:
   - name: Sonarr
     host: 192.168.0.105
     port: 8989
-    api_token: '{{sonarr_api_key}}' # gman is case-insensitive, so this will also be replaced correctly
+    api_token: '{{SONARR_API_KEY}}'
 ```
 
 Then, all you need to do to run `managarr` with the secrets injected is:
@@ -393,8 +406,6 @@ gman managarr
 ## Detailed Usage
 
 ### Storing and Managing Secrets
-
-All secret names are automatically converted to `snake_case`.
 
 - **Add a secret:**
   ```sh
@@ -480,8 +491,8 @@ providers:
 run_configs:
   - name: aws
     secrets:
-      - aws_access_key_id
-      - aws_secret_access_key
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
 ```
 
 Switch providers on the fly using the provider name defined in `providers`:

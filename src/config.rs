@@ -136,13 +136,18 @@ impl ProviderConfig {
     ///
     /// ```no_run
     /// # use gman::config::ProviderConfig;
-    /// let provider_config = ProviderConfig::default().extract_provider();
-    /// println!("using provider: {}", provider_config.name());
+    /// let mut provider_config = ProviderConfig::default();
+		/// let provider = provider_config.extract_provider();
+    /// println!("using provider: {}", provider.name());
     /// ```
     pub fn extract_provider(&mut self) -> &mut dyn SecretProvider {
         match &mut self.provider_type {
             SupportedProvider::Local { provider_def } => {
                 debug!("Using local secret provider");
+                provider_def
+            }
+            SupportedProvider::AwsSecretsManager { provider_def } => {
+                debug!("Using AWS Secrets Manager provider");
                 provider_def
             }
         }
@@ -278,15 +283,14 @@ pub fn load_config() -> Result<Config> {
         .providers
         .iter_mut()
         .filter(|p| matches!(p.provider_type, SupportedProvider::Local { .. }))
-        .for_each(|p| match p.provider_type {
-            SupportedProvider::Local {
+        .for_each(|p| {
+            if let SupportedProvider::Local {
                 ref mut provider_def,
-            } => {
-                if provider_def.password_file.is_none()
-                    && let Some(local_password_file) = Config::local_provider_password_file()
-                {
-                    provider_def.password_file = Some(local_password_file);
-                }
+            } = p.provider_type
+                && provider_def.password_file.is_none()
+                && let Some(local_password_file) = Config::local_provider_password_file()
+            {
+                provider_def.password_file = Some(local_password_file);
             }
         });
 

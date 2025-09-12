@@ -1,4 +1,4 @@
-use anyhow::{Context, anyhow, bail};
+use anyhow::{anyhow, bail, Context};
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -6,20 +6,20 @@ use std::{env, fs};
 use zeroize::Zeroize;
 
 use crate::config::Config;
+use crate::providers::git_sync::{repo_name_from_url, sync_and_push, SyncOpts};
 use crate::providers::SecretProvider;
-use crate::providers::git_sync::{SyncOpts, repo_name_from_url, sync_and_push};
 use crate::{
     ARGON_M_COST_KIB, ARGON_P, ARGON_T_COST, HEADER, KDF, KEY_LEN, NONCE_LEN, SALT_LEN, VERSION,
 };
 use anyhow::Result;
 use argon2::{Algorithm, Argon2, Params, Version};
-use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
+use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use chacha20poly1305::aead::rand_core::RngCore;
 use chacha20poly1305::{
-    Key, XChaCha20Poly1305, XNonce,
     aead::{Aead, KeyInit, OsRng},
+    Key, XChaCha20Poly1305, XNonce,
 };
-use dialoguer::{Input, theme};
+use dialoguer::{theme, Input};
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
@@ -36,15 +36,13 @@ use validator::Validate;
 /// Example
 /// ```no_run
 /// use gman::providers::local::LocalProvider;
-/// use gman::providers::SecretProvider;
-/// use gman::config::Config;
+/// use gman::providers::{SecretProvider, SupportedProvider};
+/// use gman::config::{Config, ProviderConfig};
 ///
 /// let provider = LocalProvider::default();
-/// let cfg = Config::default();
 /// // Will prompt for a password when reading/writing secrets unless a
 /// // password file is configured.
-/// // provider.set_secret(&cfg, "MY_SECRET", "value")?;
-/// # Ok::<(), anyhow::Error>(())
+/// let _ = provider.set_secret("MY_SECRET", "value");
 /// ```
 #[derive(Debug, Clone, Validate, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -71,12 +69,13 @@ impl Default for LocalProvider {
     }
 }
 
+#[async_trait::async_trait]
 impl SecretProvider for LocalProvider {
     fn name(&self) -> &'static str {
         "LocalProvider"
     }
 
-    fn get_secret(&self, key: &str) -> Result<String> {
+    async fn get_secret(&self, key: &str) -> Result<String> {
         let vault_path = self.active_vault_path()?;
         let vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
         let envelope = vault
@@ -90,7 +89,7 @@ impl SecretProvider for LocalProvider {
         Ok(plaintext)
     }
 
-    fn set_secret(&self, key: &str, value: &str) -> Result<()> {
+    async fn set_secret(&self, key: &str, value: &str) -> Result<()> {
         let vault_path = self.active_vault_path()?;
         let mut vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
         if vault.contains_key(key) {
@@ -109,7 +108,7 @@ impl SecretProvider for LocalProvider {
         store_vault(&vault_path, &vault).with_context(|| "failed to save secret to the vault")
     }
 
-    fn update_secret(&self, key: &str, value: &str) -> Result<()> {
+    async fn update_secret(&self, key: &str, value: &str) -> Result<()> {
         let vault_path = self.active_vault_path()?;
         let mut vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
 
@@ -132,7 +131,7 @@ impl SecretProvider for LocalProvider {
         store_vault(&vault_path, &vault).with_context(|| "failed to save secret to the vault")
     }
 
-    fn delete_secret(&self, key: &str) -> Result<()> {
+    async fn delete_secret(&self, key: &str) -> Result<()> {
         let vault_path = self.active_vault_path()?;
         let mut vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
         if !vault.contains_key(key) {
@@ -144,7 +143,7 @@ impl SecretProvider for LocalProvider {
         store_vault(&vault_path, &vault).with_context(|| "failed to save secret to the vault")
     }
 
-    fn list_secrets(&self) -> Result<Vec<String>> {
+    async fn list_secrets(&self) -> Result<Vec<String>> {
         let vault_path = self.active_vault_path()?;
         let vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
         let keys: Vec<String> = vault.keys().cloned().collect();
@@ -152,7 +151,7 @@ impl SecretProvider for LocalProvider {
         Ok(keys)
     }
 
-    fn sync(&mut self) -> Result<()> {
+    async fn sync(&mut self) -> Result<()> {
         let mut config_changed = false;
 
         if self.git_branch.is_none() {

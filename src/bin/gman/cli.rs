@@ -1,8 +1,8 @@
 use crate::command::preview_command;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
+use futures::future::join_all;
 use gman::config::{Config, RunConfig};
 use gman::providers::SecretProvider;
-use heck::ToSnakeCase;
 use log::{debug, error};
 use regex::Regex;
 use std::collections::HashMap;
@@ -14,7 +14,7 @@ use std::process::Command;
 const ARG_FORMAT_PLACEHOLDER_KEY: &str = "{{key}}";
 const ARG_FORMAT_PLACEHOLDER_VALUE: &str = "{{value}}";
 
-pub fn wrap_and_run_command(
+pub async fn wrap_and_run_command(
     secrets_provider: &mut dyn SecretProvider,
     config: &Config,
     tokens: Vec<OsString>,
@@ -36,43 +36,40 @@ pub fn wrap_and_run_command(
             .find(|c| c.name.as_deref() == Some(run_config_profile_name))
     });
     if let Some(run_cfg) = run_config_opt {
-        let secrets_result = run_cfg
+        let secrets_result_futures = run_cfg
             .secrets
             .as_ref()
             .ok_or_else(|| {
                 anyhow!("No secrets configured for run profile '{run_config_profile_name}'")
             })?
             .iter()
-            .map(|key| {
-                let secret_name = key.to_snake_case().to_uppercase();
+            .map(async |key| {
                 debug!(
-                    "Retrieving secret '{secret_name}' for run profile '{}'",
+                    "Retrieving secret '{key}' for run profile '{}'",
                     run_config_profile_name
                 );
-                secrets_provider
-                    .get_secret(key.to_snake_case().to_uppercase().as_str())
-                    .ok()
-                    .map_or_else(
-                        || {
-                            debug!("Failed to fetch secret '{secret_name}' from secret provider");
-                            (
-                                key.to_uppercase(),
-                                Err(anyhow!(
-                                    "Failed to fetch secret '{secret_name}' from secret provider"
-                                )),
-                            )
-                        },
-                        |value| {
-                            if dry_run {
-                                (key.to_uppercase(), Ok("*****".into()))
-                            } else {
-                                (key.to_uppercase(), Ok(value))
-                            }
-                        },
-                    )
+                secrets_provider.get_secret(key).await.ok().map_or_else(
+                    || {
+                        debug!("Failed to fetch secret '{key}' from secret provider");
+                        (
+                            key,
+                            Err(anyhow!(
+                                "Failed to fetch secret '{key}' from secret provider"
+                            )),
+                        )
+                    },
+                    |value| {
+                        if dry_run {
+                            (key, Ok("*****".into()))
+                        } else {
+                            (key, Ok(value))
+                        }
+                    },
+                )
             });
+        let secrets_result = join_all(secrets_result_futures).await;
         let err = secrets_result
-            .clone()
+            .iter()
             .filter(|(_, r)| r.is_err())
             .collect::<Vec<_>>();
         if !err.is_empty() {
@@ -86,14 +83,15 @@ pub fn wrap_and_run_command(
             ));
         }
         let secrets = secrets_result
-            .map(|(k, r)| (k, r.unwrap()))
+            .into_iter()
+            .map(|(k, r)| (k.as_str(), r.unwrap()))
             .collect::<HashMap<_, _>>();
         let mut cmd_def = Command::new(prog);
         if run_cfg.flag.is_some() {
             let args = parse_args(args, run_cfg, secrets.clone(), dry_run)?;
             run_cmd(cmd_def.args(&args), dry_run)?;
         } else if run_cfg.files.is_some() {
-            let injected_files = generate_files_secret_injections(secrets.clone(), run_cfg)
+            let injected_files = generate_files_secret_injections(secrets, run_cfg)
                 .with_context(|| "failed to inject secrets into files")?;
             for (file, original_content, new_content) in &injected_files {
                 if dry_run {
@@ -115,7 +113,7 @@ pub fn wrap_and_run_command(
                                 e
                             );
                             debug!("Restoring original content to file '{}'", file.display());
-                            fs::write(file, original_content)                                        .with_context(|| format!("failed to restore original content to file '{}' after injection failure: {}", file.display(), e))?;
+                            fs::write(file, original_content).with_context(|| format!("failed to restore original content to file '{}' after injection failure: {}", file.display(), e))?;
                             return Err(e);
                         }
                     }
@@ -143,7 +141,7 @@ pub fn wrap_and_run_command(
                                 file.display()
                             );
                             debug!("Restoring original content to file '{}'", file.display());
-                            fs::write(file, original_content)                                        .with_context(|| format!("failed to restore original content to file '{}' after command execution failure: {}", file.display(), e))?;
+                            fs::write(file, original_content).with_context(|| format!("failed to restore original content to file '{}' after command execution failure: {}", file.display(), e))?;
                         }
                     }
                     return Err(e);
@@ -162,9 +160,9 @@ pub fn wrap_and_run_command(
 }
 
 fn generate_files_secret_injections(
-    secrets: HashMap<String, String>,
+    secrets: HashMap<&str, String>,
     run_config: &RunConfig,
-) -> Result<Vec<(&PathBuf, String, String)>> {
+) -> Result<Vec<(PathBuf, String, String)>> {
     let re = Regex::new(r"\{\{([A-Za-z0-9_]+)\}\}")?;
     let mut results = Vec::new();
     for file in run_config
@@ -184,12 +182,16 @@ fn generate_files_secret_injections(
         })?;
         let new_content = re.replace_all(&original_content, |caps: &regex::Captures| {
             secrets
-                .get(&caps[1].to_snake_case().to_uppercase())
+                .get(&caps[1])
                 .map(|s| s.as_str())
                 .unwrap_or(&caps[0])
                 .to_string()
         });
-        results.push((file, original_content.to_string(), new_content.to_string()));
+        results.push((
+            file.into(),
+            original_content.to_string(),
+            new_content.to_string(),
+        ));
     }
     Ok(results)
 }
@@ -207,7 +209,7 @@ pub fn run_cmd(cmd: &mut Command, dry_run: bool) -> Result<()> {
 pub fn parse_args(
     args: &[OsString],
     run_config: &RunConfig,
-    secrets: HashMap<String, String>,
+    secrets: HashMap<&str, String>,
     dry_run: bool,
 ) -> Result<Vec<OsString>> {
     let mut args = args.to_vec();
@@ -259,20 +261,21 @@ mod tests {
     use std::ffi::OsString;
 
     struct DummyProvider;
+    #[async_trait::async_trait]
     impl SecretProvider for DummyProvider {
         fn name(&self) -> &'static str {
             "Dummy"
         }
-        fn get_secret(&self, key: &str) -> Result<String> {
+        async fn get_secret(&self, key: &str) -> Result<String> {
             Ok(format!("{}_VAL", key))
         }
-        fn set_secret(&self, _key: &str, _value: &str) -> Result<()> {
+        async fn set_secret(&self, _key: &str, _value: &str) -> Result<()> {
             Ok(())
         }
-        fn delete_secret(&self, _key: &str) -> Result<()> {
+        async fn delete_secret(&self, _key: &str) -> Result<()> {
             Ok(())
         }
-        fn sync(&mut self) -> Result<()> {
+        async fn sync(&mut self) -> Result<()> {
             Ok(())
         }
     }
@@ -280,14 +283,14 @@ mod tests {
     #[test]
     fn test_generate_files_secret_injections() {
         let mut secrets = HashMap::new();
-        secrets.insert("SECRET1".to_string(), "value1".to_string());
+        secrets.insert("SECRET1", "value1".to_string());
         let temp_dir = tempfile::tempdir().unwrap();
         let file_path = temp_dir.path().join("test.txt");
-        fs::write(&file_path, "{{secret1}}").unwrap();
+        fs::write(&file_path, "{{SECRET1}}").unwrap();
 
         let run_config = RunConfig {
             name: Some("test".to_string()),
-            secrets: Some(vec!["secret1".to_string()]),
+            secrets: Some(vec!["SECRET1".to_string()]),
             files: Some(vec![file_path.clone()]),
             flag: None,
             flag_position: None,
@@ -297,8 +300,8 @@ mod tests {
         let result = generate_files_secret_injections(secrets, &run_config).unwrap();
 
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].0, &file_path);
-        assert_str_eq!(result[0].1, "{{secret1}}");
+        assert_eq!(result[0].0, file_path);
+        assert_str_eq!(result[0].1, "{{SECRET1}}");
         assert_str_eq!(result[0].2, "value1");
     }
 
@@ -313,7 +316,7 @@ mod tests {
             arg_format: Some("{{key}}={{value}}".into()),
         };
         let mut secrets = HashMap::new();
-        secrets.insert("API_KEY".into(), "xyz".into());
+        secrets.insert("API_KEY", "xyz".into());
 
         // Insert at position
         let args = vec![OsString::from("run"), OsString::from("image")];
@@ -341,18 +344,20 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_wrap_and_run_command_no_profile() {
+    #[tokio::test]
+    async fn test_wrap_and_run_command_no_profile() {
         let cfg = Config::default();
         let mut dummy = DummyProvider;
         let prov: &mut dyn SecretProvider = &mut dummy;
         let tokens = vec![OsString::from("echo"), OsString::from("hi")];
-        let err = wrap_and_run_command(prov, &cfg, tokens, None, true).unwrap_err();
+        let err = wrap_and_run_command(prov, &cfg, tokens, None, true)
+            .await
+            .unwrap_err();
         assert!(err.to_string().contains("No run profile found"));
     }
 
-    #[test]
-    fn test_wrap_and_run_command_env_injection_dry_run() {
+    #[tokio::test]
+    async fn test_wrap_and_run_command_env_injection_dry_run() {
         // Create a config with a matching run profile for command "echo"
         let run_cfg = RunConfig {
             name: Some("echo".into()),
@@ -372,7 +377,7 @@ mod tests {
         // Capture stderr for dry_run preview
         let tokens = vec![OsString::from("echo"), OsString::from("hello")];
         // Best-effort: ensure function does not error under dry_run
-        let res = wrap_and_run_command(prov, &cfg, tokens, None, true);
+        let res = wrap_and_run_command(prov, &cfg, tokens, None, true).await;
         assert!(res.is_ok());
         // Not asserting output text to keep test platform-agnostic
     }

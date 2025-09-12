@@ -113,7 +113,7 @@ fn cli_add_get_list_update_delete_roundtrip() {
         .env("XDG_CACHE_HOME", &xdg_cache)
         .args(["--output", "json", "get", "my_api_key"]);
     get_json.assert().success().stdout(
-        predicate::str::contains("MY_API_KEY").and(predicate::str::contains("super_secret")),
+        predicate::str::contains("my_api_key").and(predicate::str::contains("super_secret")),
     );
 
     // list
@@ -123,7 +123,7 @@ fn cli_add_get_list_update_delete_roundtrip() {
         .arg("list");
     list.assert()
         .success()
-        .stdout(predicate::str::contains("MY_API_KEY"));
+        .stdout(predicate::str::contains("my_api_key"));
 
     // update
     let mut update = Command::cargo_bin("gman").unwrap();

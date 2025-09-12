@@ -1,14 +1,13 @@
 use clap::{
-    CommandFactory, Parser, ValueEnum, crate_authors, crate_description, crate_name, crate_version,
+    crate_authors, crate_description, crate_name, crate_version, CommandFactory, Parser, ValueEnum,
 };
 use std::ffi::OsString;
 
 use anyhow::{Context, Result};
 use clap::Subcommand;
 use crossterm::execute;
-use crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
+use crossterm::terminal::{disable_raw_mode, LeaveAlternateScreen};
 use gman::config::{get_config_file_path, load_config};
-use heck::ToSnakeCase;
 use std::io::{self, IsTerminal, Read, Write};
 use std::panic::PanicHookInfo;
 
@@ -143,22 +142,22 @@ async fn main() -> Result<()> {
         Commands::Add { name } => {
             let plaintext =
                 read_all_stdin().with_context(|| "unable to read plaintext from stdin")?;
-            let snake_case_name = name.to_snake_case().to_uppercase();
             secrets_provider
-                .set_secret(&snake_case_name, plaintext.trim_end())
+                .set_secret(&name, plaintext.trim_end())
+                .await
                 .map(|_| match cli.output {
                     Some(_) => (),
-                    None => println!("✓ Secret '{snake_case_name}' added to the vault."),
+                    None => println!("✓ Secret '{name}' added to the vault."),
                 })?;
         }
         Commands::Get { name } => {
-            let snake_case_name = name.to_snake_case().to_uppercase();
             secrets_provider
-                .get_secret(&snake_case_name)
+                .get_secret(&name)
+                .await
                 .map(|secret| match cli.output {
                     Some(OutputFormat::Json) => {
                         let json_output = serde_json::json!({
-                            snake_case_name: secret
+                            name: secret
                         });
                         println!(
                             "{}",
@@ -174,24 +173,23 @@ async fn main() -> Result<()> {
         Commands::Update { name } => {
             let plaintext =
                 read_all_stdin().with_context(|| "unable to read plaintext from stdin")?;
-            let snake_case_name = name.to_snake_case().to_uppercase();
             secrets_provider
-                .update_secret(&snake_case_name, plaintext.trim_end())
+                .update_secret(&name, plaintext.trim_end())
+                .await
                 .map(|_| match cli.output {
                     Some(_) => (),
-                    None => println!("✓ Secret '{snake_case_name}' updated in the vault."),
+                    None => println!("✓ Secret '{name}' updated in the vault."),
                 })?;
         }
         Commands::Delete { name } => {
-            let snake_case_name = name.to_snake_case().to_uppercase();
-            secrets_provider.delete_secret(&snake_case_name).map(|_| {
+            secrets_provider.delete_secret(&name).await.map(|_| {
                 if cli.output.is_none() {
-                    println!("✓ Secret '{snake_case_name}' deleted from the vault.")
+                    println!("✓ Secret '{name}' deleted from the vault.")
                 }
             })?;
         }
         Commands::List {} => {
-            let secrets = secrets_provider.list_secrets()?;
+            let secrets = secrets_provider.list_secrets().await?;
             if secrets.is_empty() {
                 match cli.output {
                     Some(OutputFormat::Json) => {
@@ -217,14 +215,15 @@ async fn main() -> Result<()> {
             }
         }
         Commands::Sync {} => {
-            secrets_provider.sync().map(|_| {
+            secrets_provider.sync().await.map(|_| {
                 if cli.output.is_none() {
                     println!("✓ Secrets synchronized with remote")
                 }
             })?;
         }
         Commands::External(tokens) => {
-            wrap_and_run_command(secrets_provider, &config, tokens, cli.profile, cli.dry_run)?;
+            wrap_and_run_command(secrets_provider, &config, tokens, cli.profile, cli.dry_run)
+                .await?;
         }
         Commands::Completions { shell } => {
             let mut cmd = Cli::command();
