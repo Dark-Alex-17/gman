@@ -9,7 +9,7 @@ documentation = "https://github.com/Dark-Alex-17/gman"
 repository = "https://github.com/Dark-Alex-17/gman"
 homepage = "https://github.com/Dark-Alex-17/gman"
 readme = "README.md"
-license = "MIT"
+license = "BSD-3-Clause"
 rust-version = "1.89.0"
 exclude = [".github", "CONTRIBUTING.md", "*.log", "tags"]
 
