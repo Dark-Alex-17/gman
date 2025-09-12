@@ -19,9 +19,16 @@ argon2 = "0.5.3"
 backtrace = "0.3.75"
 base64 = "0.22.1"
 chacha20poly1305 = { version = "0.10.1", features = ["std"] }
-clap = { version = "4.5.47", features = ["cargo", "derive", "env", "wrap_help"] }
+clap = { version = "4.5.47", features = [
+  "cargo",
+  "derive",
+  "env",
+  "wrap_help",
+] }
 clap_complete = "4.5.57"
-confy = { version = "1.0.0", default-features = false, features = ["yaml_conf"] }
+confy = { version = "1.0.0", default-features = false, features = [
+  "yaml_conf",
+] }
 crossterm = "0.29.0"
 dirs = "6.0.0"
 human-panic = "2.0.3"
@@ -41,10 +48,10 @@ chrono = "0.4.42"
 indoc = "2.0.6"
 regex = "1.11.2"
 serde_yaml = "0.9.34"
+tempfile = "3.22.0"
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"
-tempfile = "3.10.1"
 proptest = "1.5.0"
 assert_cmd = "2.0.16"
 predicates = "3.1.2"
