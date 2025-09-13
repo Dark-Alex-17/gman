@@ -236,6 +236,30 @@ jobs:
             aarch64-*-linux-*) sudo apt-get -y install gcc-aarch64-linux-gnu ;;
           esac
 
+      - name: Install LLVM/Clang for bindgen
+        if: matrix.job.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm-dev libclang-dev pkg-config
+          echo "LIBCLANG_PATH=$(llvm-config --libdir)" >> $GITHUB_ENV
+
+      - name: Install LLVM/Clang for bindgen
+        if: matrix.job.os == 'macOS-latest'
+        run: |
+          brew update
+          brew install llvm
+          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
+          echo "LLVM_CONFIG_PATH=$(brew --prefix llvm)/bin/llvm-config" >> $GITHUB_ENV
+
+      - name: Install LLVM (libclang) for bindgen
+        if: matrix.job.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          choco install llvm -y
+          # libclang.dll lives in <LLVM>\bin; point bindgen at it
+          $llvm = "C:\Program Files\LLVM"
+          echo "LIBCLANG_PATH=$llvm\bin" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Install the bindgen-cli
         run: cargo install --force --locked bindgen-cli
 
