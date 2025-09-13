@@ -3,17 +3,19 @@
 //! Implementations provide storage/backends for secrets and a common
 //! interface used by the CLI.
 pub mod aws_secrets_manager;
+pub mod azure_key_vault;
 pub mod gcp_secret_manager;
 mod git_sync;
 pub mod local;
 
+use std::fmt;
 use crate::providers::local::LocalProvider;
 use anyhow::{Result, anyhow};
+use aws_secrets_manager::AwsSecretsManagerProvider;
+use gcp_secret_manager::GcpSecretManagerProvider;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use validator::{Validate, ValidationErrors};
-use aws_secrets_manager::AwsSecretsManagerProvider;
-use gcp_secret_manager::GcpSecretManagerProvider;
 
 /// A secret storage backend capable of CRUD, with optional
 /// update, listing, and sync support.
@@ -59,6 +61,10 @@ pub enum SupportedProvider {
         #[serde(flatten)]
         provider_def: GcpSecretManagerProvider,
     },
+    AzureKeyVault {
+        #[serde(flatten)]
+        provider_def: azure_key_vault::AzureKeyVaultProvider,
+    },
 }
 
 impl Validate for SupportedProvider {
@@ -66,7 +72,8 @@ impl Validate for SupportedProvider {
         match self {
             SupportedProvider::Local { provider_def } => provider_def.validate(),
             SupportedProvider::AwsSecretsManager { provider_def } => provider_def.validate(),
-						SupportedProvider::GcpSecretManager { provider_def } => provider_def.validate(),
+            SupportedProvider::GcpSecretManager { provider_def } => provider_def.validate(),
+						SupportedProvider::AzureKeyVault { provider_def } => provider_def.validate(),
         }
     }
 }
@@ -80,11 +87,12 @@ impl Default for SupportedProvider {
 }
 
 impl Display for SupportedProvider {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             SupportedProvider::Local { .. } => write!(f, "local"),
             SupportedProvider::AwsSecretsManager { .. } => write!(f, "aws_secrets_manager"),
-						SupportedProvider::GcpSecretManager { .. } => write!(f, "gcp_secret_manager"),
+            SupportedProvider::GcpSecretManager { .. } => write!(f, "gcp_secret_manager"),
+						SupportedProvider::AzureKeyVault { .. } => write!(f, "azure_key_vault"),
         }
     }
 }

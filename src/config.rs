@@ -150,10 +150,14 @@ impl ProviderConfig {
                 debug!("Using AWS Secrets Manager provider");
                 provider_def
             }
-						SupportedProvider::GcpSecretManager { provider_def } => {
-								debug!("Using GCP Secret Manager provider");
-								provider_def
-						}
+            SupportedProvider::GcpSecretManager { provider_def } => {
+                debug!("Using GCP Secret Manager provider");
+                provider_def
+            }
+            SupportedProvider::AzureKeyVault { provider_def } => {
+                debug!("Using Azure Key Vault provider");
+                provider_def
+            }
         }
     }
 }

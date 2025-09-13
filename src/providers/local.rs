@@ -37,7 +37,7 @@ use validator::Validate;
 /// ```no_run
 /// use gman::providers::local::LocalProvider;
 /// use gman::providers::{SecretProvider, SupportedProvider};
-/// use gman::config::{Config, ProviderConfig};
+/// use gman::config::Config;
 ///
 /// let provider = LocalProvider::default();
 /// // Will prompt for a password when reading/writing secrets unless a

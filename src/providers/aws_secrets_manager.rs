@@ -19,7 +19,7 @@ use validator::Validate;
 /// Example
 /// ```no_run
 /// use gman::providers::{SecretProvider, SupportedProvider};
-/// use gman::config::{Config, ProviderConfig};
+/// use gman::config::Config;
 /// use gman::providers::aws_secrets_manager::AwsSecretsManagerProvider;
 ///
 /// let provider = AwsSecretsManagerProvider {

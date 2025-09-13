@@ -13,6 +13,7 @@ use std::panic::PanicHookInfo;
 
 use crate::cli::wrap_and_run_command;
 use std::panic;
+use std::process::exit;
 
 mod cli;
 mod command;
@@ -132,6 +133,11 @@ async fn main() -> Result<()> {
     if cli.show_config_path {
         println!("{}", get_config_file_path()?.display());
         return Ok(());
+    }
+    if cli.command.is_none() {
+        Cli::command().print_help()?;
+        println!();
+        exit(1);
     }
 
     let config = load_config()?;
