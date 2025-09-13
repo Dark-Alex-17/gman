@@ -242,10 +242,43 @@ jobs:
         run: |
           set -euxo pipefail
           sudo apt-get -y update
-          sudo apt-get -y install clang llvm-dev libclang-dev pkg-config cmake make build-essential
+          # toolchain needed by bindgen & vendored C builds
+          sudo apt-get -y install clang llvm-dev libclang-dev pkg-config cmake make build-essential musl-tools
+          # install the external bindgen that aws-lc-sys can call
           cargo install --locked bindgen-cli
-          # help bindgen find libclang
-          echo "LIBCLANG_PATH=$(llvm-config --libdir)" >> $GITHUB_ENV
+          # make libclang discoverable to bindgen
+          echo "LIBCLANG_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          # sanity check (fail early if not visible)
+          bindgen --version
+          clang --version
+
+      - name: Configure bindgen target flags (musl)
+        if: matrix.job.os == 'ubuntu-latest' && contains(matrix.job.target, 'musl')
+        shell: bash
+        run: |
+          set -euxo pipefail
+          case "${{ matrix.job.target }}" in
+            x86_64-unknown-linux-musl)
+              echo "BINDGEN_EXTRA_CLANG_ARGS_x86_64_unknown_linux_musl=--target=x86_64-unknown-linux-musl" >> "$GITHUB_ENV"
+              echo "CC_x86_64_unknown_linux_musl=musl-gcc" >> "$GITHUB_ENV"
+              ;;
+            aarch64-unknown-linux-musl)
+              # provided by your cross toolchain action
+              echo "BINDGEN_EXTRA_CLANG_ARGS_aarch64_unknown_linux_musl=--target=aarch64-unknown-linux-musl" >> "$GITHUB_ENV"
+              echo "CC_aarch64_unknown_linux_musl=aarch64-linux-musl-gcc" >> "$GITHUB_ENV"
+              ;;
+            arm-unknown-linux-musleabihf)
+              echo "BINDGEN_EXTRA_CLANG_ARGS_arm_unknown_linux_musleabihf=--target=arm-unknown-linux-musleabihf" >> "$GITHUB_ENV"
+              echo "CC_arm_unknown_linux_musleabihf=arm-linux-musleabihf-gcc" >> "$GITHUB_ENV"
+              ;;
+            armv7-unknown-linux-musleabihf)
+              echo "BINDGEN_EXTRA_CLANG_ARGS_armv7_unknown_linux_musleabihf=--target=armv7-unknown-linux-musleabihf" >> "$GITHUB_ENV"
+              echo "CC_armv7_unknown_linux_musleabihf=armv7-linux-musleabihf-gcc" >> "$GITHUB_ENV"
+              ;;
+          esac
+          # helpful when linking C sub-builds
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
 
       - name: OpenSSL (vendored) toolchain for musl
         if: startsWith(matrix.job.name, 'linux-') && contains(matrix.job.target, 'musl')
