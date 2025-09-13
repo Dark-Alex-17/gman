@@ -308,12 +308,30 @@ jobs:
           esac
 
       - name: Build
-        run: cargo build --release --verbose --target=${{ matrix.job.target }} --locked
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if [[ "${{ matrix.job.use-cross || 'false' }}" == 'true' ]]; then
+            cross build --release --locked --target=${{ matrix.job.target }} --verbose
+          else
+            cargo build --release --locked --target=${{ matrix.job.target }} --verbose
+          fi
 
       - name: Verify file
         shell: bash
         run: |
           file target/${{ matrix.job.target }}/release/gman
+
+      - name: Test
+        if: matrix.job.target != 'aarch64-apple-darwin' && matrix.job.target != 'aarch64-pc-windows-msvc'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if [[ "${{ matrix.job.use-cross || 'false' }}" == 'true' ]]; then
+            cross test --release --locked --target=${{ matrix.job.target }} --verbose ${{ matrix.job.test-bin }}
+          else
+            cargo test  --release --locked --target=${{ matrix.job.target }} --verbose ${{ matrix.job.test-bin }}
+          fi
 
       - name: Test
         if: matrix.job.target != 'aarch64-apple-darwin' && matrix.job.target != 'aarch64-pc-windows-msvc'
