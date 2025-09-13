@@ -236,6 +236,9 @@ jobs:
             aarch64-*-linux-*) sudo apt-get -y install gcc-aarch64-linux-gnu ;;
           esac
 
+      - name: Install the bindgen-cli
+        run: cargo install --force --locked bindgen-cli
+
       - name: Build
         run: cargo build --release --verbose --target=${{ matrix.job.target }} --locked
 
