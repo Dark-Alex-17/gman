@@ -245,6 +245,35 @@ jobs:
           # Make sure libclang is visible if needed (version may differ):
           echo "LIBCLANG_PATH=$(llvm-config --libdir)" >> $GITHUB_ENV
 
+      - name: OpenSSL (vendored) toolchain for musl
+        if: startsWith(matrix.job.name, 'linux-') && contains(matrix.job.target, 'musl')
+        shell: bash
+        run: |
+          # Tools needed for building vendored OpenSSL
+          sudo apt-get -y update
+          sudo apt-get -y install musl-tools pkg-config perl make cmake
+
+          # Let openssl-sys know we're cross-compiling and want static
+          echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
+
+          # Set the right C compiler per musl target (some provided by taiki-e/setup-cross-toolchain-action)
+          case "${{ matrix.job.target }}" in
+            x86_64-unknown-linux-musl)
+              echo "CC_x86_64_unknown_linux_musl=musl-gcc" >> $GITHUB_ENV
+              ;;
+            aarch64-unknown-linux-musl)
+              # If your toolchain action installs aarch64-linux-musl-gcc, use that:
+              echo "CC_aarch64_unknown_linux_musl=aarch64-linux-musl-gcc" >> $GITHUB_ENV
+              ;;
+            arm-unknown-linux-musleabihf)
+              echo "CC_arm_unknown_linux_musleabihf=arm-linux-musleabihf-gcc" >> $GITHUB_ENV
+              ;;
+            armv7-unknown-linux-musleabihf)
+              echo "CC_armv7_unknown_linux_musleabihf=armv7-linux-musleabihf-gcc" >> $GITHUB_ENV
+              ;;
+          esac
+
       - name: Build
         run: cargo build --release --verbose --target=${{ matrix.job.target }} --locked
 
