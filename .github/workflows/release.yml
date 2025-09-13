@@ -224,7 +224,7 @@ jobs:
           target: ${{ matrix.job.target }}
 
       - uses: taiki-e/install-action@cross
-        if: ${{ matrix.job.use-cross }}
+        # if: ${{ matrix.job.use-cross }}
 
       - name: Installing needed Ubuntu dependencies
         if: matrix.job.os == 'ubuntu-latest'
