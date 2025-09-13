@@ -163,7 +163,7 @@ fn generate_files_secret_injections(
     secrets: HashMap<&str, String>,
     run_config: &RunConfig,
 ) -> Result<Vec<(PathBuf, String, String)>> {
-    let re = Regex::new(r"\{\{([A-Za-z0-9_]+)\}\}")?;
+    let re = Regex::new(r"\{\{(.+)\}\}")?;
     let mut results = Vec::new();
     for file in run_config
         .files
@@ -283,14 +283,14 @@ mod tests {
     #[test]
     fn test_generate_files_secret_injections() {
         let mut secrets = HashMap::new();
-        secrets.insert("SECRET1", "value1".to_string());
+        secrets.insert("testing/SOME-secret", "value1".to_string());
         let temp_dir = tempfile::tempdir().unwrap();
         let file_path = temp_dir.path().join("test.txt");
-        fs::write(&file_path, "{{SECRET1}}").unwrap();
+        fs::write(&file_path, "{{testing/SOME-secret}}").unwrap();
 
         let run_config = RunConfig {
             name: Some("test".to_string()),
-            secrets: Some(vec!["SECRET1".to_string()]),
+            secrets: Some(vec!["testing/SOME-secret".to_string()]),
             files: Some(vec![file_path.clone()]),
             flag: None,
             flag_position: None,
@@ -301,7 +301,7 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].0, file_path);
-        assert_str_eq!(result[0].1, "{{SECRET1}}");
+        assert_str_eq!(result[0].1, "{{testing/SOME-secret}}");
         assert_str_eq!(result[0].2, "value1");
     }
 

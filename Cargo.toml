@@ -52,6 +52,8 @@ tokio = { version = "1.47.1", features = ["full"] }
 aws-config = { version = "1.8.6", features = ["behavior-version-latest"] }
 async-trait = "0.1.89"
 futures = "0.3.31"
+gcloud-sdk = { version = "0.28.1", features = ["google-cloud-secretmanager-v1"] }
+crc32c = "0.6.8"
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"

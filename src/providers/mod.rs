@@ -3,6 +3,7 @@
 //! Implementations provide storage/backends for secrets and a common
 //! interface used by the CLI.
 pub mod aws_secrets_manager;
+pub mod gcp_secret_manager;
 mod git_sync;
 pub mod local;
 
@@ -11,6 +12,8 @@ use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use validator::{Validate, ValidationErrors};
+use aws_secrets_manager::AwsSecretsManagerProvider;
+use gcp_secret_manager::GcpSecretManagerProvider;
 
 /// A secret storage backend capable of CRUD, with optional
 /// update, listing, and sync support.
@@ -43,7 +46,6 @@ pub trait SecretProvider: Send + Sync {
 /// Registry of built-in providers.
 #[derive(Debug, Clone, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields, tag = "type", rename_all = "snake_case")]
-//TODO test that this works with the AWS config
 pub enum SupportedProvider {
     Local {
         #[serde(flatten)]
@@ -51,7 +53,11 @@ pub enum SupportedProvider {
     },
     AwsSecretsManager {
         #[serde(flatten)]
-        provider_def: aws_secrets_manager::AwsSecretsManagerProvider,
+        provider_def: AwsSecretsManagerProvider,
+    },
+    GcpSecretManager {
+        #[serde(flatten)]
+        provider_def: GcpSecretManagerProvider,
     },
 }
 
@@ -60,6 +66,7 @@ impl Validate for SupportedProvider {
         match self {
             SupportedProvider::Local { provider_def } => provider_def.validate(),
             SupportedProvider::AwsSecretsManager { provider_def } => provider_def.validate(),
+						SupportedProvider::GcpSecretManager { provider_def } => provider_def.validate(),
         }
     }
 }
@@ -77,6 +84,7 @@ impl Display for SupportedProvider {
         match self {
             SupportedProvider::Local { .. } => write!(f, "local"),
             SupportedProvider::AwsSecretsManager { .. } => write!(f, "aws_secrets_manager"),
+						SupportedProvider::GcpSecretManager { .. } => write!(f, "gcp_secret_manager"),
         }
     }
 }
