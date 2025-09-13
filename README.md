@@ -92,6 +92,7 @@ gman aws sts get-caller-identity
 - [Providers](#providers)
   - [Local](#provider-local)
   - [AWS Secrets Manager](#provider-aws_secrets_manager)
+  - [GCP Secret Manager](#provider-gcp_secret_manager)
 - [Run Configurations](#run-configurations)
   - [Environment Variable Secret Injection](#environment-variable-secret-injection)
   - [Inject Secrets via Command-Line Flags](#inject-secrets-via-command-line-flags)
@@ -244,7 +245,7 @@ documented and added without breaking existing setups. The following table shows
 | [`aws_secrets_manager`](https://docs.aws.amazon.com/secretsmanager/latest/userguide/intro.html)                          | ✅      | [AWS Secrets Manager](#provider-aws_secrets_manager) |                                            |
 | [`hashicorp_vault`](https://www.hashicorp.com/en/products/vault)                                                         | 🕒     |                                                      |                                            |
 | [`azure_key_vault`](https://azure.microsoft.com/en-us/products/key-vault/)                                               | 🕒     |                                                      |                                            |
-| [`gcp_secret_manager`](https://cloud.google.com/security/products/secret-manager?hl=en)                                  | 🕒     |                                                      |                                            |
+| [`gcp_secret_manager`](https://cloud.google.com/security/products/secret-manager?hl=en)                                  | ✅      | [GCP Secret Manager](#provider-gcp_secret_manager)   |                                            |
 | [`1password`](https://1password.com/)                                                                                    | 🕒     |                                                      |                                            |
 | [`bitwarden`](https://bitwarden.com/)                                                                                    | 🕒     |                                                      |                                            |
 | [`dashlane`](https://www.dashlane.com/)                                                                                  | 🕒     |                                                      | Waiting for CLI support for adding secrets |
@@ -300,6 +301,64 @@ Security and encryption basics
   to enable robust, portable decryption.
 - Memory hygiene: Sensitive buffers are wiped after use (zeroized), and secrets are handled with types (like SecretString)
   that reduce accidental exposure through logs and debug prints. No plaintext secrets are logged.
+
+### Provider: `aws_secrets_manager`
+
+The `aws_secrets_manager` provider uses AWS Secrets Manager as the backing storage location for secrets.
+
+- Requires two fields: `aws_profile` and `aws_region`.
+- Uses the shared AWS config/credentials files under the named profile to authenticate.
+
+Configuration example:
+
+```yaml
+default_provider: aws
+providers:
+  - name: aws
+    type: aws_secrets_manager
+    aws_profile: default     # Name from your ~/.aws/config and ~/.aws/credentials
+    aws_region: us-east-1    # Region where your secrets live
+```
+
+Important notes:
+- Deletions are immediate: the provider calls `DeleteSecret` with `force_delete_without_recovery = true`, so there is no
+  recovery window. If you need a recovery window, do not delete via `gman`.
+- `add` uses `CreateSecret`. If the secret already exists, AWS returns an error. Use `update` to change an existing
+  secret value.
+- IAM permissions: ensure the configured principal has `secretsmanager:GetSecretValue`, `CreateSecret`, `UpdateSecret`,
+  `DeleteSecret`, and `ListSecrets` for the relevant region and ARNs.
+- Credential resolution: the provider explicitly selects the given `aws_profile` and `aws_region` via the AWS config
+  loader; it does not fall back to other profiles or env-only defaults.
+
+### Provider: `gcp_secret_manager`
+
+The `gcp_secret_manager` provider uses Google Cloud Secret Manager as the backing storage location for secrets.
+
+- Requires: `gcp_project_id` (string) to scope secrets to your project.
+- Replication: secrets are created with Automatic replication.
+
+Configuration example:
+
+```yaml
+default_provider: gcp
+providers:
+  - name: gcp
+    type: gcp_secret_manager
+    gcp_project_id: my-project-id
+```
+
+Authentication (Application Default Credentials):
+- Option 1: `gcloud auth application-default login` (user ADC on your machine).
+- Option 2: Set `GOOGLE_APPLICATION_CREDENTIALS` to a service account key JSON file path.
+    - Example: `export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json`
+    - Ensure the service account has appropriate roles (e.g., `roles/secretmanager.admin` or a combination of 
+      get/create/update/delete/list permissions).
+
+Important notes:
+- Deletion removes the entire secret resource, including all versions, not just the latest.
+- `set` creates the Secret and first version; if the Secret already exists, it errors (AlreadyExists). Use `update` to 
+  add a new version.
+- `get` returns the latest version; older versions remain unless you delete the secret.
 
 ## Run Configurations
 
@@ -402,35 +461,6 @@ Then, all you need to do to run `managarr` with the secrets injected is:
 ```shell
 gman managarr
 ```
-
-### Provider: `aws_secrets_manager`
-
-The `aws_secrets_manager` provider stores secrets in AWS Secrets Manager using the official AWS Rust SDK.
-
-- Requires two fields: `aws_profile` and `aws_region`.
-- Uses the shared AWS config/credentials files under the named profile to authenticate.
-- Implements: `get`, `set`, `update`, `delete`, and `list`.
-
-Configuration example:
-
-```yaml
-default_provider: aws
-providers:
-  - name: aws
-    type: aws_secrets_manager
-    aws_profile: default     # Name from your ~/.aws/config and ~/.aws/credentials
-    aws_region: us-east-1    # Region where your secrets live
-```
-
-Important notes:
-- Deletions are immediate: the provider calls `DeleteSecret` with `force_delete_without_recovery = true`, so there is no
-  recovery window. If you need a recovery window, do not delete via `gman`.
-- `add` uses `CreateSecret`. If the secret already exists, AWS returns an error. Use `update` to change an existing 
-  secret value.
-- IAM permissions: ensure the configured principal has `secretsmanager:GetSecretValue`, `CreateSecret`, `UpdateSecret`, 
-  `DeleteSecret`, and `ListSecrets` for the relevant region and ARNs.
-- Credential resolution: the provider explicitly selects the given `aws_profile` and `aws_region` via the AWS config 
-  loader; it does not fall back to other profiles or env-only defaults.
 
 ## Detailed Usage
 
