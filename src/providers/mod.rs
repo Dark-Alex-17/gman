@@ -8,12 +8,12 @@ pub mod gcp_secret_manager;
 mod git_sync;
 pub mod local;
 
-use std::fmt;
 use crate::providers::local::LocalProvider;
 use anyhow::{Result, anyhow};
 use aws_secrets_manager::AwsSecretsManagerProvider;
 use gcp_secret_manager::GcpSecretManagerProvider;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::fmt::{Display, Formatter};
 use validator::{Validate, ValidationErrors};
 
@@ -73,7 +73,7 @@ impl Validate for SupportedProvider {
             SupportedProvider::Local { provider_def } => provider_def.validate(),
             SupportedProvider::AwsSecretsManager { provider_def } => provider_def.validate(),
             SupportedProvider::GcpSecretManager { provider_def } => provider_def.validate(),
-						SupportedProvider::AzureKeyVault { provider_def } => provider_def.validate(),
+            SupportedProvider::AzureKeyVault { provider_def } => provider_def.validate(),
         }
     }
 }
@@ -92,7 +92,7 @@ impl Display for SupportedProvider {
             SupportedProvider::Local { .. } => write!(f, "local"),
             SupportedProvider::AwsSecretsManager { .. } => write!(f, "aws_secrets_manager"),
             SupportedProvider::GcpSecretManager { .. } => write!(f, "gcp_secret_manager"),
-						SupportedProvider::AzureKeyVault { .. } => write!(f, "azure_key_vault"),
+            SupportedProvider::AzureKeyVault { .. } => write!(f, "azure_key_vault"),
         }
     }
 }

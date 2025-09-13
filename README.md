@@ -93,6 +93,7 @@ gman aws sts get-caller-identity
   - [Local](#provider-local)
   - [AWS Secrets Manager](#provider-aws_secrets_manager)
   - [GCP Secret Manager](#provider-gcp_secret_manager)
+  - [Azure Key Vault](#provider-azure_key_vault)
 - [Run Configurations](#run-configurations)
   - [Environment Variable Secret Injection](#environment-variable-secret-injection)
   - [Inject Secrets via Command-Line Flags](#inject-secrets-via-command-line-flags)
@@ -244,7 +245,7 @@ documented and added without breaking existing setups. The following table shows
 | `local`                                                                                                                  | ✅      | [Local](#provider-local)                             |                                            |
 | [`aws_secrets_manager`](https://docs.aws.amazon.com/secretsmanager/latest/userguide/intro.html)                          | ✅      | [AWS Secrets Manager](#provider-aws_secrets_manager) |                                            |
 | [`hashicorp_vault`](https://www.hashicorp.com/en/products/vault)                                                         | 🕒     |                                                      |                                            |
-| [`azure_key_vault`](https://azure.microsoft.com/en-us/products/key-vault/)                                               | 🕒     |                                                      |                                            |
+| [`azure_key_vault`](https://azure.microsoft.com/en-us/products/key-vault/)                                               | ✅      | [Azure Key Vault](#provider-azure_key_vault)         |                                            |
 | [`gcp_secret_manager`](https://cloud.google.com/security/products/secret-manager?hl=en)                                  | ✅      | [GCP Secret Manager](#provider-gcp_secret_manager)   |                                            |
 | [`1password`](https://1password.com/)                                                                                    | 🕒     |                                                      |                                            |
 | [`bitwarden`](https://bitwarden.com/)                                                                                    | 🕒     |                                                      |                                            |
@@ -359,6 +360,35 @@ Important notes:
 - `set` creates the Secret and first version; if the Secret already exists, it errors (AlreadyExists). Use `update` to 
   add a new version.
 - `get` returns the latest version; older versions remain unless you delete the secret.
+
+### Provider: `azure_key_vault`
+
+The `azure_key_vault` provider uses Azure Key Vault as the backing storage location for secrets.
+
+- Requires: `vault_name` (Key Vault name; the endpoint is constructed as `https://<vault_name>.vault.azure.net`).
+
+Configuration example:
+
+```yaml
+default_provider: azure
+providers:
+  - name: azure
+    type: azure_key_vault
+    vault_name: my-vault-name
+```
+
+Authentication:
+- Use the Azure CLI and ensure you are logged in: `az login`.
+- If needed, select the correct subscription: `az account set -s <subscription-id-or-name>`.
+- The provider uses `DefaultAzureCredential`, which can authenticate via Azure CLI, environment variables, managed 
+  identity, etc.
+
+Important notes:
+- Deleting a secret removes the entire secret and all its versions, not just the latest version. Depending on your 
+  vault’s soft-delete settings, the secret may enter a deleted state until purged.
+- `set`/`update` create a new secret version each time; reads return the latest by default.
+- Ensure your identity has the necessary Key Vault permissions (RBAC such as `Key Vault Secrets User`/`Administrator`, 
+  or appropriate access policies) for get/set/list/delete.
 
 ## Run Configurations
 

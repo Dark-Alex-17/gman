@@ -22,7 +22,9 @@ fn test_gcp_provider_validation_ok() {
 
 #[test]
 fn test_gcp_provider_missing_project() {
-    let provider = GcpSecretManagerProvider { gcp_project_id: None };
+    let provider = GcpSecretManagerProvider {
+        gcp_project_id: None,
+    };
     assert!(provider.validate().is_err());
 }
 
@@ -71,4 +73,3 @@ providers:
         .expect("should find default provider");
     assert_eq!(extracted.name.as_deref(), Some("gcp"));
 }
-
