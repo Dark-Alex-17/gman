@@ -236,6 +236,15 @@ jobs:
             aarch64-*-linux-*) sudo apt-get -y install gcc-aarch64-linux-gnu ;;
           esac
 
+      - name: Install bindgen + clang toolchain (for aws-lc on musl/ARM)
+        if: matrix.job.os == 'ubuntu-latest' && contains(matrix.job.target, 'musl') && (startsWith(matrix.job.target, 'arm-') || startsWith(matrix.job.target, 'armv7-') || startsWith(matrix.job.target, 'aarch64-'))
+        shell: bash
+        run: |
+          sudo apt-get -y install clang llvm-dev libclang-dev pkg-config cmake build-essential
+          cargo install --locked bindgen-cli
+          # Make sure libclang is visible if needed (version may differ):
+          echo "LIBCLANG_PATH=$(llvm-config --libdir)" >> $GITHUB_ENV
+
       - name: Build
         run: cargo build --release --verbose --target=${{ matrix.job.target }} --locked
 
