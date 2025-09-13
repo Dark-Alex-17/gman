@@ -311,11 +311,12 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          if [[ "${{ matrix.job.use-cross || 'false' }}" == 'true' ]]; then
-            cross build --release --locked --target=${{ matrix.job.target }} --verbose
-          else
-            cargo build --release --locked --target=${{ matrix.job.target }} --verbose
-          fi
+          cross build --release --target=${{ matrix.job.target }}
+          # if [[ "${{ matrix.job.use-cross || 'false' }}" == 'true' ]]; then
+          #   cross build --release --locked --target=${{ matrix.job.target }} --verbose
+          # else
+          #   cargo build --release --locked --target=${{ matrix.job.target }} --verbose
+          # fi
 
       - name: Verify file
         shell: bash
