@@ -237,7 +237,7 @@ jobs:
           esac
 
       - name: Install clang + bindgen for musl targets
-        # if: matrix.job.os == 'ubuntu-latest' && contains(matrix.job.target, 'musl')
+        if: matrix.job.os == 'ubuntu-latest'
         shell: bash
         run: |
           set -euxo pipefail
