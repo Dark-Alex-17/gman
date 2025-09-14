@@ -272,6 +272,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
+          sudo add-apt-repository universe
           sudo apt-get -y update
           sudo apt-get install -y libclang
 #          case ${{ matrix.target }} in
