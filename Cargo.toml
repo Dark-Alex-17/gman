@@ -58,8 +58,13 @@ gcloud-sdk = { version = "0.28.1", features = [
 crc32c = "0.6.8"
 azure_identity = "0.27.0"
 azure_security_keyvault_secrets = "0.6.0"
-openssl = { version = "0.10", features = ["vendored"] }
 aws-lc-sys = { version = "0.31.0", features = ["bindgen"] }
+
+[target.'cfg(all(target_os="linux", target_env="musl"))'.dependencies]
+openssl = { version = "0.10", features = ["vendored"] }
+
+[target.'cfg(target_os="macos")'.dependencies]
+openssl = { version = "0.10", features = ["vendored"] }
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"
