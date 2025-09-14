@@ -165,29 +165,31 @@ jobs:
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
             use-cross: true
-            artifact-suffix: aarch64-musl
+            cargo-flags: ""
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            use-cross: true
             cargo-flags: ""
           - target: aarch64-apple-darwin
             os: macos-latest
             use-cross: true
-            artifact-suffix: macos-arm64
             cargo-flags: ""
           - target: aarch64-pc-windows-msvc
             os: windows-latest
             use-cross: true
-            artifact-suffix: windows-aarch64
             cargo-flags: ""
           - target: x86_64-apple-darwin
             os: macos-latest
-            artifact-suffix: macos
             cargo-flags: ""
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            artifact-suffix: windows
             cargo-flags: ""
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
-            artifact-suffix: linux-musl
+            use-cross: true
+            cargo-flags: ""
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
             use-cross: true
             cargo-flags: ""
 
@@ -282,6 +284,22 @@ jobs:
         shell: bash
         run: $BUILD_CMD build --locked --release --target=${{ matrix.target }} ${{ matrix.cargo-flags }}
 
+      - name: Verify file
+        shell: bash
+        run: |
+          file target/${{ matrix.target }}/release/gman
+
+      - name: Test
+        if: matrix.target != 'aarch64-apple-darwin' && matrix.target != 'aarch64-pc-windows-msvc'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if [[ "${{ matrix.use-cross || 'false' }}" == 'true' ]]; then
+            cross test --release --locked --target=${{ matrix.target }} --verbose
+          else
+            cargo test  --release --locked --target=${{ matrix.target }} --verbose
+          fi
+
       - name: Build Archive
         shell: bash
         id: package
@@ -320,17 +338,6 @@ jobs:
               echo "sha=dist/$name.sha256" >> $GITHUB_OUTPUT
           fi
 
-#      - name: Test
-#        if: matrix.target != 'aarch64-apple-darwin' && matrix.target != 'aarch64-pc-windows-msvc'
-#        shell: bash
-#        run: |
-#          set -euxo pipefail
-#          if [[ "${{ matrix.use-cross || 'false' }}" == 'true' ]]; then
-#            cross test --release --locked --target=${{ matrix.target }} --verbose
-#          else
-#            cargo test  --release --locked --target=${{ matrix.target }} --verbose
-#          fi
-
       - name: Publish Archive
         if: env.ACT != 'true'
         uses: softprops/action-gh-release@v2
@@ -346,7 +353,7 @@ jobs:
 
       - name: Add artifacts
         run: |
-          mkdir -p artifacts
+          [[ -d artifacts ]] || mkdir -p artifacts
           cp ${{ steps.package.outputs.archive }} artifacts/
           cp ${{ steps.package.outputs.sha }} artifacts/
 
