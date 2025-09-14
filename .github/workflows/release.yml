@@ -171,7 +171,7 @@ jobs:
             os: macos-latest
             use-cross: true
             cargo-flags: ""
-          - target: aarch64_pc_windows_msvc
+          - target: aarch64-pc-windows-msvc
             os: windows-latest
             use-cross: true
             cargo-flags: ""
