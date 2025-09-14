@@ -268,13 +268,29 @@ jobs:
         shell: bash
         run: echo "BUILD_CMD=cross" >> $GITHUB_ENV
 
-      - name: Installing needed Ubuntu dependencies
+      - name: Install latest LLVM/Clang
         if: matrix.os == 'ubuntu-latest'
-        shell: bash
         run: |
-          sudo add-apt-repository universe
-          sudo apt-get -y update
-          sudo apt-get install -y libclang
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          # omit the version to get the latest stable for your Ubuntu (24.04 "noble" on ubuntu-latest)
+          sudo ./llvm.sh all
+          # ensure libclang dev package is present (adjust the "22" if a newer major exists)
+          sudo apt-get update
+          sudo apt-get install -y libclang-22-dev
+
+      # Make libclang discoverable by bindgen/clang-sys
+      - name: Export LIBCLANG_PATH
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          echo "LIBCLANG_PATH=$(llvm-config-22 --libdir)" >> "$GITHUB_ENV"
+          ls -l "$LIBCLANG_PATH"/libclang*.so || true
+
+#      - name: Installing needed Ubuntu dependencies
+#        if: matrix.os == 'ubuntu-latest'
+#        shell: bash
+#        run: |
+#          sudo apt-get -y update
 #          case ${{ matrix.target }} in
 #            arm*-linux-*) sudo apt-get -y install gcc-arm-linux-gnueabihf ;;
 #            aarch64-*-linux-*) sudo apt-get -y install gcc-aarch64-linux-gnu ;;
