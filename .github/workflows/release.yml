@@ -341,7 +341,6 @@ jobs:
           tag_name: v${{ env.RELEASE_VERSION }}
           name: "v${{ env.RELEASE_VERSION }}"
           body: ${{ env.changelog_body }}
-          draft: false
           prerelease: false
 
       - name: Add artifacts
