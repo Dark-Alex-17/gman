@@ -338,14 +338,15 @@ jobs:
               echo "sha=dist/$name.sha256" >> $GITHUB_OUTPUT
           fi
 
-      - name: Publish Archive
+      - name: Publish Archive and SHA
         if: env.ACT != 'true'
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          draft: false
-          files: ${{ steps.package.outputs.archive }} ${{ steps.package.outputs.sha }}
+          files: |
+            ${{ steps.package.outputs.archive }} 
+            ${{ steps.package.outputs.sha }}
           tag_name: v${{ env.RELEASE_VERSION }}
           name: "v${{ env.RELEASE_VERSION }}"
           body: ${{ env.changelog_body }}
