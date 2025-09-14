@@ -280,12 +280,44 @@ jobs:
         shell: bash
         run: echo "BUILD_CMD=cross" >> $GITHUB_ENV
 
-#      - name: Installing needed Ubuntu dependencies
-#        if: matrix.job.os == 'ubuntu-latest'
-#        shell: bash
-#        run: |
-#          sudo apt-get -y update
-#          case ${{ matrix.job.target }} in
+      - name: Installing needed Ubuntu dependencies
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          sudo apt-get -y update
+          sudo apt install -y librust-bindgen+clap-dev \
+            librust-bindgen+default-dev \
+            librust-bindgen+env-logger-dev \
+            librust-bindgen+log-dev \
+            librust-bindgen+logging-dev \
+            librust-bindgen+runtime-dev \
+            librust-bindgen+static-dev \
+            librust-bindgen+which-dev \
+            librust-bindgen-dev \
+            librust-cbindgen+clap-dev \
+            librust-cbindgen-dev \
+            librust-wasm-bindgen+default-dev \
+            librust-wasm-bindgen+serde-dev \
+            librust-wasm-bindgen+serde-json-dev \
+            librust-wasm-bindgen+serde-serialize-dev \
+            librust-wasm-bindgen+spans-dev \
+            librust-wasm-bindgen+strict-macro-dev \
+            librust-wasm-bindgen+xxx-debug-only-print-generated-code-dev \
+            librust-wasm-bindgen-backend+extra-traits-dev \
+            librust-wasm-bindgen-backend-dev \
+            librust-wasm-bindgen-dev \
+            librust-wasm-bindgen-macro+spans-dev \
+            librust-wasm-bindgen-macro+strict-macro-dev \
+            librust-wasm-bindgen-macro-dev \
+            librust-wasm-bindgen-macro-support+extra-traits-dev \
+            librust-wasm-bindgen-macro-support+spans-dev \
+            librust-wasm-bindgen-macro-support-dev \
+            librust-wasm-bindgen-shared-dev \
+            librust-wasm-bindgen-webidl-dev \
+            bindgen-0.56 \
+            bindgen \
+            cbindgen
+#          case ${{ matrix.target }} in
 #            arm*-linux-*) sudo apt-get -y install gcc-arm-linux-gnueabihf ;;
 #            aarch64-*-linux-*) sudo apt-get -y install gcc-aarch64-linux-gnu ;;
 #          esac
