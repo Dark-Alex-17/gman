@@ -273,14 +273,14 @@ jobs:
           sudo ./llvm.sh all
           # ensure libclang dev package is present (adjust the "22" if a newer major exists)
           sudo apt-get update
-          sudo apt-get install -y libclang-20-dev
+          sudo apt-get install -y libclang-20-dev libclang-dev
 
       # Make libclang discoverable by bindgen/clang-sys
-      - name: Export LIBCLANG_PATH
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          echo "LIBCLANG_PATH=$(llvm-config-20 --libdir)" >> "$GITHUB_ENV"
-          ls -l "$LIBCLANG_PATH"/libclang*.so || true
+#      - name: Export LIBCLANG_PATH
+#        if: matrix.os == 'ubuntu-latest'
+#        run: |
+#          echo "LIBCLANG_PATH=$(llvm-config-20 --libdir)" >> "$GITHUB_ENV"
+#          ls -l "$LIBCLANG_PATH"/libclang*.so || true
 
 #      - name: Installing needed Ubuntu dependencies
 #        if: matrix.os == 'ubuntu-latest'
