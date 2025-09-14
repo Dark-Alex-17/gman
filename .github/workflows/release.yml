@@ -300,13 +300,12 @@ jobs:
         id: package
         env:
           target: ${{ matrix.target }}
-          version: ${{ env.RELEASE_VERSION }}
         run: |
           set -euxo pipefail
 
           bin=${GITHUB_REPOSITORY##*/}
           dist_dir=`pwd`/dist
-          name=$bin-$version-$target
+          name=$bin-$target
           executable=target/$target/release/$bin
 
           if [[ "$RUNNER_OS" == "Windows" ]]; then
@@ -348,6 +347,7 @@ jobs:
           prerelease: false
 
       - name: Add artifacts
+        shell: bash
         run: |
           [[ -d artifacts ]] || mkdir -p artifacts
           cp ${{ steps.package.outputs.archive }} artifacts/

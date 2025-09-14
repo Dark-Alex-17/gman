@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop';
 
 $PackageName = 'gman'
 $toolsDir    = "$(Split-Path -parent $MyInvocation.MyCommand.Definition)"
-$url64       = 'https://github.com/Dark-Alex-17/gman/releases/download/v$version/gman-windows.tar.gz'
+$url64       = 'https://github.com/Dark-Alex-17/gman/releases/download/v$version/gman-windows.zip'
 $checksum64  = '$hash_64'
 
 $packageArgs = @{
