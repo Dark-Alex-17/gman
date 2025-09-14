@@ -284,6 +284,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
+          sudo add-apt-repository universe
           sudo apt-get -y update
           sudo apt install -y librust-bindgen+clap-dev \
             librust-bindgen+default-dev \
