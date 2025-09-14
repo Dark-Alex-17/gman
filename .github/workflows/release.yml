@@ -222,6 +222,7 @@ jobs:
           git pull
 
       - name: Set environment variables
+        shell: bash
         run: |
           release_version="$(cat ./artifacts/release-version)"
           echo "RELEASE_VERSION=$release_version" >> $GITHUB_ENV
