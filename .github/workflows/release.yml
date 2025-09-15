@@ -313,11 +313,10 @@ jobs:
           cd $dist_dir
 
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-              archive=$dist_dir/$name.zip
+              archive=$dist_dir/$name.exe
               sha=$dist_dir/$name.sha256
-              7z a $archive *
               certutil -hashfile $archive sha256 | grep -E [A-Fa-f0-9]{64} > $sha
-              echo "archive=dist/$name.zip" >> $GITHUB_OUTPUT
+              echo "archive=dist/$name.exe" >> $GITHUB_OUTPUT
               echo "sha=dist/$name.sha256" >> $GITHUB_OUTPUT
           else
               archive=$dist_dir/$name.tar.gz
@@ -393,9 +392,7 @@ jobs:
           version: ${{ env.RELEASE_VERSION }}
           release-tag: v${{ env.RELEASE_VERSION }}
           token: ${{ secrets.WINGET_GITHUB_TOKEN }}
-#          installers-regex: |
-#            https://github.com/${{ github.repository }}/releases/download/v${{ env.RELEASE_VERSION }}/gman-x86_64-pc-windows-msvc.zip
-#            https://github.com/${{ github.repository }}/releases/download/v${{ env.RELEASE_VERSION }}/gman-aarch64-pc-windows-msvc.zip
+          installers-regex: 'gman-x86_64-pc-windows-msvc.exe$'
 
   publish-homebrew-formula:
     needs: [publish-github-release]
