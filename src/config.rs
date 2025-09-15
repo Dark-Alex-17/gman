@@ -20,10 +20,10 @@
 //! rc.validate().unwrap();
 //! ```
 
-use collections::HashSet;
 use crate::providers::local::LocalProvider;
 use crate::providers::{SecretProvider, SupportedProvider};
 use anyhow::{Context, Result};
+use collections::HashSet;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -215,19 +215,19 @@ fn default_provider_exists(config: &Config) -> Result<(), ValidationError> {
 }
 
 fn providers_names_are_unique(config: &Config) -> Result<(), ValidationError> {
-		let mut names = HashSet::new();
-		for provider in &config.providers {
-				if let Some(name) = &provider.name {
-						if !names.insert(name) {
-								let mut err = ValidationError::new("duplicate_provider_name");
-								err.message = Some(Cow::Borrowed(
-										"Provider names must be unique; duplicate found",
-								));
-								return Err(err);
-						}
-				}
-		}
-		Ok(())
+    let mut names = HashSet::new();
+    for provider in &config.providers {
+        if let Some(name) = &provider.name
+            && !names.insert(name)
+        {
+            let mut err = ValidationError::new("duplicate_provider_name");
+            err.message = Some(Cow::Borrowed(
+                "Provider names must be unique; duplicate found",
+            ));
+            return Err(err);
+        }
+    }
+    Ok(())
 }
 
 impl Default for Config {

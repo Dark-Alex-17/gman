@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-	use gman::config::{Config, ProviderConfig, RunConfig};
+    use gman::config::{Config, ProviderConfig, RunConfig};
     use pretty_assertions::assert_eq;
 
     use validator::Validate;
@@ -255,15 +255,15 @@ mod tests {
 
     #[test]
     fn test_config_duplicate_provider_names_is_invalid() {
-			let name = Some("dup".into());
+        let name = Some("dup".into());
         let p1 = ProviderConfig {
-					name: name.clone(),
-					..Default::default()
-				};
+            name: name.clone(),
+            ..Default::default()
+        };
         let p2 = ProviderConfig {
-					name,
-					..Default::default()
-				};
+            name,
+            ..Default::default()
+        };
 
         let cfg = Config {
             default_provider: Some("dup".into()),

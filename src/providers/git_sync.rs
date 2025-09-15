@@ -140,15 +140,15 @@ pub(in crate::providers) fn resolve_git(override_path: Option<&PathBuf>) -> Resu
 }
 
 pub(in crate::providers) fn default_git_username(git: &Path) -> Result<String> {
-	debug!("Checking for default git username");
-	run_git_config_capture(git, &["config", "user.name"])
-		.with_context(|| "unable to determine git user name")
+    debug!("Checking for default git username");
+    run_git_config_capture(git, &["config", "user.name"])
+        .with_context(|| "unable to determine git user name")
 }
 
 pub(in crate::providers) fn default_git_email(git: &Path) -> Result<String> {
-	debug!("Checking for default git username");
-	run_git_config_capture(git, &["config", "user.email"])
-		.with_context(|| "unable to determine git user email")
+    debug!("Checking for default git username");
+    run_git_config_capture(git, &["config", "user.email"])
+        .with_context(|| "unable to determine git user email")
 }
 
 pub(in crate::providers) fn ensure_git_available(git: &Path) -> Result<()> {

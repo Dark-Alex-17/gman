@@ -11,11 +11,11 @@ use std::io::{self, IsTerminal, Read, Write};
 use std::panic::PanicHookInfo;
 
 use crate::cli::wrap_and_run_command;
+use crate::utils::persist_config_file;
 use dialoguer::Editor;
 use std::panic;
 use std::process::exit;
 use validator::Validate;
-use crate::utils::persist_config_file;
 
 mod cli;
 mod command;
@@ -242,7 +242,7 @@ async fn main() -> Result<()> {
             new_config
                 .validate()
                 .with_context(|| "updated configuration is invalid")?;
-						persist_config_file(&new_config)?;
+            persist_config_file(&new_config)?;
             println!("✓ Configuration updated successfully");
         }
         Commands::Sync {} => {

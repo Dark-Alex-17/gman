@@ -1,6 +1,7 @@
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -53,40 +54,40 @@ providers:
 #[test]
 #[cfg(unix)]
 fn cli_config_no_changes() {
-	let (td, xdg_cfg, xdg_cache) = setup_env();
-	let pw_file = td.path().join("pw.txt");
-	fs::write(&pw_file, b"pw\n").unwrap();
-	write_yaml_config(&xdg_cfg, &pw_file, None);
+    let (td, xdg_cfg, xdg_cache) = setup_env();
+    let pw_file = td.path().join("pw.txt");
+    fs::write(&pw_file, b"pw\n").unwrap();
+    write_yaml_config(&xdg_cfg, &pw_file, None);
 
-	// Create a no-op editor script that exits successfully without modifying the file
-	let editor = td.path().join("noop-editor.sh");
-	fs::write(&editor, b"#!/bin/sh\nexit 0\n").unwrap();
-	let mut perms = fs::metadata(&editor).unwrap().permissions();
-	perms.set_mode(0o755);
-	fs::set_permissions(&editor, perms).unwrap();
+    // Create a no-op editor script that exits successfully without modifying the file
+    let editor = td.path().join("noop-editor.sh");
+    fs::write(&editor, b"#!/bin/sh\nexit 0\n").unwrap();
+    let mut perms = fs::metadata(&editor).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&editor, perms).unwrap();
 
-	let mut cmd = Command::cargo_bin("gman").unwrap();
-	cmd.env("XDG_CONFIG_HOME", &xdg_cfg)
-		.env("XDG_CACHE_HOME", &xdg_cache)
-		.env("EDITOR", &editor)
-		.arg("config");
+    let mut cmd = Command::cargo_bin("gman").unwrap();
+    cmd.env("XDG_CONFIG_HOME", &xdg_cfg)
+        .env("XDG_CACHE_HOME", &xdg_cache)
+        .env("EDITOR", &editor)
+        .arg("config");
 
-	cmd.assert()
-		.success()
-		.stdout(predicate::str::contains("No changes made to configuration"));
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("No changes made to configuration"));
 }
 
 #[test]
 #[cfg(unix)]
 fn cli_config_updates_and_persists() {
-	let (td, xdg_cfg, xdg_cache) = setup_env();
-	let pw_file = td.path().join("pw.txt");
-	fs::write(&pw_file, b"pw\n").unwrap();
-	write_yaml_config(&xdg_cfg, &pw_file, None);
+    let (td, xdg_cfg, xdg_cache) = setup_env();
+    let pw_file = td.path().join("pw.txt");
+    fs::write(&pw_file, b"pw\n").unwrap();
+    write_yaml_config(&xdg_cfg, &pw_file, None);
 
-	// Editor script appends a valid run_configs section to the YAML file
-	let editor = td.path().join("append-run-config.sh");
-	let script = r#"#!/bin/sh
+    // Editor script appends a valid run_configs section to the YAML file
+    let editor = td.path().join("append-run-config.sh");
+    let script = r#"#!/bin/sh
 FILE="$1"
 cat >> "$FILE" <<'EOF'
 run_configs:
@@ -95,26 +96,26 @@ run_configs:
 EOF
 exit 0
 "#;
-	fs::write(&editor, script.as_bytes()).unwrap();
-	let mut perms = fs::metadata(&editor).unwrap().permissions();
-	perms.set_mode(0o755);
-	fs::set_permissions(&editor, perms).unwrap();
+    fs::write(&editor, script.as_bytes()).unwrap();
+    let mut perms = fs::metadata(&editor).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&editor, perms).unwrap();
 
-	let mut cmd = Command::cargo_bin("gman").unwrap();
-	cmd.env("XDG_CONFIG_HOME", &xdg_cfg)
-		.env("XDG_CACHE_HOME", &xdg_cache)
-		.env("EDITOR", &editor)
-		.arg("config");
+    let mut cmd = Command::cargo_bin("gman").unwrap();
+    cmd.env("XDG_CONFIG_HOME", &xdg_cfg)
+        .env("XDG_CACHE_HOME", &xdg_cache)
+        .env("EDITOR", &editor)
+        .arg("config");
 
-	cmd.assert()
-		.success()
-		.stdout(predicate::str::contains("Configuration updated successfully"));
+    cmd.assert().success().stdout(predicate::str::contains(
+        "Configuration updated successfully",
+    ));
 
-	// Verify that the config file now contains the run_configs key
-	let cfg_path = xdg_cfg.join("gman").join("config.yml");
-	let written = fs::read_to_string(&cfg_path).expect("config file readable");
-	assert!(written.contains("run_configs:"));
-	assert!(written.contains("name: echo"));
+    // Verify that the config file now contains the run_configs key
+    let cfg_path = xdg_cfg.join("gman").join("config.yml");
+    let written = fs::read_to_string(&cfg_path).expect("config file readable");
+    assert!(written.contains("run_configs:"));
+    assert!(written.contains("name: echo"));
 }
 
 #[test]
