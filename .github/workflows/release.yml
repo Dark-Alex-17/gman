@@ -418,7 +418,7 @@ jobs:
           $version = $version -replace " ", "."
           choco push "$version.nupkg" -s https://push.chocolatey.org/ --api-key ${{ secrets.CHOCOLATEY_API_KEY }}
 
-publish-homebrew-formula:
+  publish-homebrew-formula:
     needs: [publish-github-release]
     name: Update Homebrew formulas
     runs-on: ubuntu-latest
