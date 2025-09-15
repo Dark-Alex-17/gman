@@ -389,10 +389,10 @@ jobs:
         if: env.ACT != 'true'
         uses: vedantmgoyal9/winget-releaser@v2
         with:
-          identifier: ${{ vars.WINGET_PACKAGE_IDENTIFIER }}
+          identifier: DarkAlex17.GMan
           version: ${{ env.RELEASE_VERSION }}
           release-tag: v${{ env.RELEASE_VERSION }}
-          token: ${{ secrets.WINGET_TOKEN }}
+          token: ${{ secrets.WINGET_GITHUB_TOKEN }}
           installers: |
             https://github.com/${{ github.repository }}/releases/download/v${{ env.RELEASE_VERSION }}/gman-x86_64-pc-windows-msvc.zip
             https://github.com/${{ github.repository }}/releases/download/v${{ env.RELEASE_VERSION }}/gman-aarch64-pc-windows-msvc.zip
