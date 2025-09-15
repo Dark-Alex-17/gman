@@ -407,7 +407,7 @@ jobs:
           cd ./deployment/chocolatey
           choco pack
           echo y | choco install gman -dv -s .
-          $version = gman --version
+          $version = gman.exe --version
           $version = $version -replace " ", "."
           choco push $version.nupkg -s https://push.chocolatey.org/ --api-key ${{ secrets.CHOCOLATEY_API_KEY }};
 
