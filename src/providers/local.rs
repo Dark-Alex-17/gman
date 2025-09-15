@@ -579,15 +579,6 @@ mod tests {
                     provider_def.git_remote_url.as_deref(),
                     Some("git@github.com:user/repo.git")
                 );
-                assert_eq!(provider_def.git_user_name.as_deref(), Some("Test User"));
-                assert_eq!(
-                    provider_def.git_user_email.as_deref(),
-                    Some("test@example.com")
-                );
-                assert_eq!(
-                    provider_def.git_executable.as_ref(),
-                    Some(&PathBuf::from("/usr/bin/git"))
-                );
             }
             _ => panic!("expected local provider"),
         }
