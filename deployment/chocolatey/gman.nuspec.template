@@ -33,9 +33,9 @@ This is a nuspec. It mostly adheres to https://docs.nuget.org/create/Nuspec-Refe
     <docsUrl>https://github.com/Dark-Alex-17/gman/blob/main/README.md</docsUrl>
     <bugTrackerUrl>https://github.com/Dark-Alex-17/gman/issues</bugTrackerUrl>
     <tags>cli cross-platform terminal credential-management secret-management rust</tags>
-    <summary>Universal command line credential management and injection tool</summary>
+    <summary>Universal CLI credential management and injection tool</summary>
     <description>
-    Universal command line credential management and injection tool.
+    Universal CLI credential management and injection tool.
 
     **Usage**
     To get started, run `gman --help` in a terminal.

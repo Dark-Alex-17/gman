@@ -144,6 +144,7 @@ impl ProviderConfig {
         match &mut self.provider_type {
             SupportedProvider::Local { provider_def } => {
                 debug!("Using local secret provider");
+                provider_def.runtime_provider_name = self.name.clone();
                 provider_def
             }
             SupportedProvider::AwsSecretsManager { provider_def } => {

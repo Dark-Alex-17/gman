@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use std::{env, fs};
 use zeroize::Zeroize;
 
-use crate::config::Config;
-use crate::providers::SecretProvider;
+use crate::config::{Config, get_config_file_path, load_config};
 use crate::providers::git_sync::{SyncOpts, repo_name_from_url, sync_and_push};
+use crate::providers::{SecretProvider, SupportedProvider};
 use crate::{
     ARGON_M_COST_KIB, ARGON_P, ARGON_T_COST, HEADER, KDF, KEY_LEN, NONCE_LEN, SALT_LEN, VERSION,
 };
@@ -54,6 +54,8 @@ pub struct LocalProvider {
     #[validate(email)]
     pub git_user_email: Option<String>,
     pub git_executable: Option<PathBuf>,
+    #[serde(skip)]
+    pub runtime_provider_name: Option<String>,
 }
 
 impl Default for LocalProvider {
@@ -65,6 +67,7 @@ impl Default for LocalProvider {
             git_user_name: None,
             git_user_email: None,
             git_executable: None,
+            runtime_provider_name: None,
         }
     }
 }
@@ -169,7 +172,9 @@ impl SecretProvider for LocalProvider {
             config_changed = true;
             debug!("Prompting user to set git_remote in config for sync");
             let remote: String = Input::with_theme(&ColorfulTheme::default())
-                .with_prompt("Enter remote git URL to sync with")
+                .with_prompt(
+                    "Enter remote git URL to sync with (e.g. 'git@github.com:user/repo.git')",
+                )
                 .validate_with(|s: &String| {
                     LocalProvider {
                         git_remote_url: Some(s.clone()),
@@ -185,9 +190,7 @@ impl SecretProvider for LocalProvider {
         }
 
         if config_changed {
-            debug!("Saving updated config");
-            confy::store("gman", "config", &self)
-                .with_context(|| "failed to save updated config")?;
+            self.persist_git_settings_to_config()?;
         }
 
         let sync_opts = SyncOpts {
@@ -203,6 +206,52 @@ impl SecretProvider for LocalProvider {
 }
 
 impl LocalProvider {
+    fn persist_git_settings_to_config(&self) -> Result<()> {
+        debug!("Saving updated config (only current local provider)");
+
+        let mut cfg = load_config().with_context(|| "failed to load existing config")?;
+
+        let target_name = self.runtime_provider_name.clone();
+        let mut updated = false;
+        for pc in cfg.providers.iter_mut() {
+            if let SupportedProvider::Local { provider_def } = &mut pc.provider_type {
+                let matches_name = match (&pc.name, &target_name) {
+                    (Some(n), Some(t)) => n == t,
+                    (Some(_), None) => false,
+                    _ => false,
+                };
+                if matches_name || target_name.is_none() {
+                    provider_def.git_branch = self.git_branch.clone();
+                    provider_def.git_remote_url = self.git_remote_url.clone();
+
+                    updated = true;
+                    if matches_name {
+                        break;
+                    }
+                }
+            }
+        }
+
+        if !updated {
+            bail!("unable to find matching local provider in config to update");
+        }
+
+        let path = get_config_file_path()?;
+        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+        if ext.eq_ignore_ascii_case("yml") || ext.eq_ignore_ascii_case("yaml") {
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let s = serde_yaml::to_string(&cfg)?;
+            fs::write(&path, s).with_context(|| format!("failed to write {}", path.display()))?;
+        } else {
+            confy::store("gman", "config", &cfg)
+                .with_context(|| "failed to save updated config via confy")?;
+        }
+
+        Ok(())
+    }
+
     fn repo_dir_for_config(&self) -> Result<Option<PathBuf>> {
         if let Some(remote) = &self.git_remote_url {
             let name = repo_name_from_url(remote);
@@ -424,6 +473,7 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
     use secrecy::{ExposeSecret, SecretString};
+    use std::env as std_env;
     use tempfile::tempdir;
 
     #[test]
@@ -458,9 +508,96 @@ mod tests {
         fs::write(&file, "secretpw\n").unwrap();
         let provider = LocalProvider {
             password_file: Some(file),
+            runtime_provider_name: None,
             ..LocalProvider::default()
         };
         let pw = provider.get_password().unwrap();
         assert_eq!(pw.expose_secret(), "secretpw");
+    }
+
+    #[test]
+    fn persist_only_target_local_provider_git_settings() {
+        let td = tempdir().unwrap();
+        let xdg = td.path().join("xdg");
+        let app_dir = xdg.join("gman");
+        fs::create_dir_all(&app_dir).unwrap();
+        unsafe {
+            std_env::set_var("XDG_CONFIG_HOME", &xdg);
+        }
+
+        let initial_yaml = indoc::indoc! {
+            "---
+            default_provider: local
+            providers:
+              - name: local
+                type: local
+                password_file: /tmp/.gman_pass
+                git_branch: main
+                git_remote_url: null
+                git_user_name: null
+                git_user_email: null
+                git_executable: null
+              - name: other
+                type: local
+                git_branch: main
+                git_remote_url: git@github.com:someone/else.git
+            run_configs:
+              - name: echo
+                secrets: [API_KEY]
+            "
+        };
+        let cfg_path = app_dir.join("config.yml");
+        fs::write(&cfg_path, initial_yaml).unwrap();
+
+        let provider = LocalProvider {
+            password_file: None,
+            git_branch: Some("dev".into()),
+            git_remote_url: Some("git@github.com:user/repo.git".into()),
+            git_user_name: Some("Test User".into()),
+            git_user_email: Some("test@example.com".into()),
+            git_executable: Some(PathBuf::from("/usr/bin/git")),
+            runtime_provider_name: Some("local".into()),
+        };
+
+        provider
+            .persist_git_settings_to_config()
+            .expect("persist ok");
+
+        let content = fs::read_to_string(&cfg_path).unwrap();
+        let cfg: crate::config::Config = serde_yaml::from_str(&content).unwrap();
+
+        assert_eq!(cfg.default_provider.as_deref(), Some("local"));
+        assert!(cfg.run_configs.is_some());
+        assert_eq!(cfg.run_configs.as_ref().unwrap().len(), 1);
+
+        let p0 = &cfg.providers[0];
+        assert_eq!(p0.name.as_deref(), Some("local"));
+        match &p0.provider_type {
+            SupportedProvider::Local { provider_def } => {
+                assert_eq!(provider_def.git_branch.as_deref(), Some("dev"));
+                assert_eq!(
+                    provider_def.git_remote_url.as_deref(),
+                    Some("git@github.com:user/repo.git")
+                );
+            }
+            _ => panic!("expected local provider"),
+        }
+
+        let p1 = &cfg.providers[1];
+        assert_eq!(p1.name.as_deref(), Some("other"));
+        match &p1.provider_type {
+            SupportedProvider::Local { provider_def } => {
+                assert_eq!(provider_def.git_branch.as_deref(), Some("main"));
+                assert_eq!(
+                    provider_def.git_remote_url.as_deref(),
+                    Some("git@github.com:someone/else.git")
+                );
+            }
+            _ => panic!("expected local provider"),
+        }
+
+        unsafe {
+            std_env::remove_var("XDG_CONFIG_HOME");
+        }
     }
 }

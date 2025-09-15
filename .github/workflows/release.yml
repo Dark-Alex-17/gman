@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       bump_type:
-        description: 'Specify the type of version bump'
+        description: "Specify the type of version bump"
         required: true
-        default: 'patch'
+        default: "patch"
         type: choice
         options:
           - patch
@@ -46,7 +46,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
       - name: Install Commitizen
         run: |
@@ -126,9 +126,7 @@ jobs:
       - name: Generate changelog for the version bump
         id: changelog
         run: |
-          changelog=$(conventional-changelog -p angular -i CHANGELOG.md -s --from ${{ env.prev_version }} --to ${{ env.version }})
-          echo "$changelog" > artifacts/changelog.md
-          echo "changelog_body=$(cat artifacts/changelog.md)" >> $GITHUB_ENV
+          conventional-changelog -p conventionalcommits -i CHANGELOG.md --from ${{ env.prev_version }} --to v${{ env.version }} > artifacts/changelog.md
 
       - name: Push changes
         if: env.ACT != 'true'
@@ -151,30 +149,42 @@ jobs:
             Cargo.toml
             Cargo.lock
 
-  build-release-artifacts:
+  publish-github-release:
     name: build-release
     needs: [bump-version]
-    runs-on: ${{ matrix.job.os }}
+    runs-on: ${{ matrix.os }}
     env:
       RUST_BACKTRACE: 1
+      BUILD_CMD: cargo
     strategy:
       fail-fast: true
       matrix:
-        # prettier-ignore
-        job:
-          # - { name: "macOS-arm64",        os: "macOS-latest",   target: "aarch64-apple-darwin",           artifact_suffix: "macos-arm64",     use-cross: true                             }
-          # - { name: "macOS-amd64",        os: "macOS-latest",   target: "x86_64-apple-darwin",            artifact_suffix: "macos"                                                        }
-          # - { name: "windows-amd64",      os: "windows-latest", target: "x86_64-pc-windows-msvc",         artifact_suffix: "windows"                                                      }
-          # - { name: "windows-aarch64",    os: "windows-latest", target: "aarch64-pc-windows-msvc",        artifact_suffix: "windows-aarch64", use-cross: true                             }
-          - { name: "linux-gnu",          os: "ubuntu-latest",  target: "x86_64-unknown-linux-gnu",       artifact_suffix: "linux"                                                        }
-          - { name: "linux-musl",         os: "ubuntu-latest",  target: "x86_64-unknown-linux-musl",      artifact_suffix: "linux-musl",      use-cross: true,                            }
-          # - { name: "linux-aarch64-gnu",  os: "ubuntu-latest",  target: "aarch64-unknown-linux-gnu",      artifact_suffix: "aarch64-gnu",     use-cross: true, test-bin: "--bin gman" }
-          # - { name: "linux-aarch64-musl", os: "ubuntu-latest",  target: "aarch64-unknown-linux-musl",     artifact_suffix: "aarch64-musl",    use-cross: true, test-bin: "--bin gman" }
-          # - { name: "linux-arm-gnu",      os: "ubuntu-latest",  target: "arm-unknown-linux-gnueabi",      artifact_suffix: "armv6-gnu",       use-cross: true, test-bin: "--bin gman" }
-          # - { name: "linux-arm-musl",     os: "ubuntu-latest",  target: "arm-unknown-linux-musleabihf",   artifact_suffix: "armv6-musl",      use-cross: true, test-bin: "--bin gman" }
-          # - { name: "linux-armv7-gnu",    os: "ubuntu-latest",  target: "armv7-unknown-linux-gnueabihf",  artifact_suffix: "armv7-gnu",       use-cross: true, test-bin: "--bin gman" }
-          # - { name: "linux-armv7-musl",   os: "ubuntu-latest",  target: "armv7-unknown-linux-musleabihf", artifact_suffix: "armv7-musl",      use-cross: true, test-bin: "--bin gman" }
-        rust: [stable]
+        include:
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            use-cross: true
+            cargo-flags: ""
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            use-cross: true
+            cargo-flags: ""
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            use-cross: true
+            cargo-flags: ""
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            cargo-flags: ""
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            cargo-flags: ""
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            use-cross: true
+            cargo-flags: ""
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            cargo-flags: ""
 
     steps:
       - name: Check if actor is repository owner
@@ -194,216 +204,6 @@ jobs:
           git fetch --all
           git pull
 
-      - name: Get bumped Cargo files (Act)
-        if: env.ACT == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: bumped-cargo-files
-          path: ${{ github.workspace }}
-
-      - uses: actions/cache@v3
-        name: Cache Cargo registry
-        with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('Cargo.lock') }}
-
-      - uses: actions/cache@v3
-        if: startsWith(matrix.job.name, 'linux-')
-        with:
-          path: ~/.cargo/bin
-          key: ${{ runner.os }}-cargo-bin-${{ hashFiles('.github/workflows/release.yml') }}
-
-      - uses: dtolnay/rust-toolchain@stable
-        name: Set Rust toolchain
-        with:
-          targets: ${{ matrix.job.target }}
-
-      - uses: taiki-e/setup-cross-toolchain-action@v1
-        with:
-          # NB: sets CARGO_BUILD_TARGET evar - do not need --target flag in build
-          target: ${{ matrix.job.target }}
-
-      - uses: taiki-e/install-action@cross
-        if: ${{ matrix.job.use-cross }}
-
-      - name: Installing needed Ubuntu dependencies
-        if: matrix.job.os == 'ubuntu-latest'
-        shell: bash
-        run: |
-          rustup update
-          sudo apt-get -y update
-          case ${{ matrix.job.target }} in
-            arm*-linux-*) sudo apt-get -y install gcc-arm-linux-gnueabihf ;;
-            aarch64-*-linux-*) sudo apt-get -y install gcc-aarch64-linux-gnu ;;
-          esac
-
-      - name: Install clang + bindgen for musl targets
-        if: matrix.job.os == 'ubuntu-latest' && contains(matrix.job.target, 'musl')
-        shell: bash
-        run: |
-          set -euxo pipefail
-          sudo apt-get -y update
-          sudo apt-get -y install clang llvm-dev libclang-dev pkg-config cmake make build-essential musl-tools
-          # force install to avoid stale cache issues
-          cargo install --force --locked bindgen-cli
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          # help bindgen find libclang
-          echo "LIBCLANG_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
-          # quick visibility checks (fail early if missing)
-          which bindgen
-          bindgen --version
-          clang --version
-
-      - name: Configure bindgen target flags for musl cross-compile
-        if: matrix.job.os == 'ubuntu-latest' && contains(matrix.job.target, 'musl')
-        shell: bash
-        run: |
-          set -euo pipefail
-          triple='${{ matrix.job.target }}'
-          # Bindgen needs explicit target to avoid host header confusion
-          echo "BINDGEN_EXTRA_CLANG_ARGS_${triple//-/_}=--target=$triple" >> "$GITHUB_ENV"
-          # CC hints help any C sub-builds in the tree
-          case "$triple" in
-            x86_64-unknown-linux-musl)
-              echo "CC_x86_64_unknown_linux_musl=musl-gcc" >> "$GITHUB_ENV"
-              ;;
-            aarch64-unknown-linux-musl)
-              echo "CC_aarch64_unknown_linux_musl=aarch64-linux-musl-gcc" >> "$GITHUB_ENV"
-              ;;
-            arm-unknown-linux-musleabihf)
-              echo "CC_arm_unknown_linux_musleabihf=arm-linux-musleabihf-gcc" >> "$GITHUB_ENV"
-              ;;
-            armv7-unknown-linux-musleabihf)
-              echo "CC_armv7_unknown_linux_musleabihf=armv7-linux-musleabihf-gcc" >> "$GITHUB_ENV"
-              ;;
-          esac
-          echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
-
-      - name: OpenSSL (vendored) toolchain for musl
-        if: startsWith(matrix.job.name, 'linux-') && contains(matrix.job.target, 'musl')
-        shell: bash
-        run: |
-          # Tools needed for building vendored OpenSSL
-          sudo apt-get -y update
-          sudo apt-get -y install musl-tools pkg-config perl make cmake
-
-          # Let openssl-sys know we're cross-compiling and want static
-          echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
-          echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
-
-          # Set the right C compiler per musl target (some provided by taiki-e/setup-cross-toolchain-action)
-          case "${{ matrix.job.target }}" in
-            x86_64-unknown-linux-musl)
-              echo "CC_x86_64_unknown_linux_musl=musl-gcc" >> $GITHUB_ENV
-              ;;
-            aarch64-unknown-linux-musl)
-              # If your toolchain action installs aarch64-linux-musl-gcc, use that:
-              echo "CC_aarch64_unknown_linux_musl=aarch64-linux-musl-gcc" >> $GITHUB_ENV
-              ;;
-            arm-unknown-linux-musleabihf)
-              echo "CC_arm_unknown_linux_musleabihf=arm-linux-musleabihf-gcc" >> $GITHUB_ENV
-              ;;
-            armv7-unknown-linux-musleabihf)
-              echo "CC_armv7_unknown_linux_musleabihf=armv7-linux-musleabihf-gcc" >> $GITHUB_ENV
-              ;;
-          esac
-
-      - name: Build
-        shell: bash
-        run: |
-          set -euxo pipefail
-          if [[ "${{ matrix.job.use-cross || 'false' }}" == 'true' ]]; then
-            cross build --release --locked --target=${{ matrix.job.target }} --verbose
-          else
-            cargo build --release --locked --target=${{ matrix.job.target }} --verbose
-          fi
-
-      - name: Verify file
-        shell: bash
-        run: |
-          file target/${{ matrix.job.target }}/release/gman
-
-      - name: Test
-        if: matrix.job.target != 'aarch64-apple-darwin' && matrix.job.target != 'aarch64-pc-windows-msvc'
-        shell: bash
-        run: |
-          set -euxo pipefail
-          if [[ "${{ matrix.job.use-cross || 'false' }}" == 'true' ]]; then
-            cross test --release --locked --target=${{ matrix.job.target }} --verbose ${{ matrix.job.test-bin }}
-          else
-            cargo test  --release --locked --target=${{ matrix.job.target }} --verbose ${{ matrix.job.test-bin }}
-          fi
-
-      - name: Test
-        if: matrix.job.target != 'aarch64-apple-darwin' && matrix.job.target != 'aarch64-pc-windows-msvc'
-        run: cargo test --release --verbose --target=${{ matrix.job.target }} ${{ matrix.job.test-bin }}
-
-      - name: Packaging final binary (Windows)
-        if: matrix.job.os == 'windows-latest'
-        shell: bash
-        run: |
-          cd target/${{ matrix.job.target }}/release
-          BINARY_NAME=gman.exe
-          if [ "${{ matrix.job.target }}" != "aarch64-pc-windows-msvc" ]; then
-            # strip the binary
-            strip $BINARY_NAME
-          fi
-          RELEASE_NAME=gman-${{ matrix.job.artifact_suffix }}
-          mkdir -p artifacts
-          tar czvf $RELEASE_NAME.tar.gz $BINARY_NAME
-          # create sha checksum files
-          certutil -hashfile $RELEASE_NAME.tar.gz sha256 | grep -E [A-Fa-f0-9]{64} > $RELEASE_NAME.sha256
-          echo "RELEASE_NAME=$RELEASE_NAME" >> $GITHUB_ENV
-
-      - name: Packaging final binary (macOS and Linux)
-        if: matrix.job.os != 'windows-latest'
-        shell: bash
-        run: |
-          # set the right strip executable
-          STRIP="strip";
-          case ${{ matrix.job.target }} in
-            arm*-linux-*) STRIP="arm-linux-gnueabihf-strip" ;;
-            aarch64-*-linux-*)    STRIP="aarch64-linux-gnu-strip" ;;
-          esac;
-          cd target/${{ matrix.job.target }}/release
-          BINARY_NAME=gman
-          # strip the binary
-          "$STRIP" "$BINARY_NAME"
-          RELEASE_NAME=gman-${{ matrix.job.artifact_suffix }}
-          tar czvf $RELEASE_NAME.tar.gz $BINARY_NAME
-          # create sha checksum files
-          shasum -a 256 $RELEASE_NAME.tar.gz > $RELEASE_NAME.sha256
-          echo "RELEASE_NAME=$RELEASE_NAME" >> $GITHUB_ENV
-
-      - name: Add artifacts
-        run: |
-          mkdir -p artifacts
-          cp target/${{ matrix.job.target }}/release/${{ env.RELEASE_NAME }}.tar.gz artifacts/
-          cp target/${{ matrix.job.target }}/release/${{ env.RELEASE_NAME }}.sha256 artifacts/
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: artifacts-${{ env.RELEASE_NAME }}
-          path: artifacts
-          overwrite: true
-
-  publish-github-release:
-    name: publish-github-release
-    needs: [build-release-artifacts]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check if actor is repository owner
-        if: ${{ github.actor != github.repository_owner  && env.ACT != 'true' }}
-        run: |
-          echo "You are not authorized to run this workflow."
-          exit 1
-
-      - name: Checkout repository
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -417,59 +217,145 @@ jobs:
           git pull
 
       - name: Set environment variables
+        shell: bash
         run: |
           release_version="$(cat ./artifacts/release-version)"
           echo "RELEASE_VERSION=$release_version" >> $GITHUB_ENV
-          changelog_body="$(cat ./artifacts/changelog.md)"
-          echo "changelog_body=$(cat artifacts/changelog.md)" >> $GITHUB_ENV
 
       - name: Validate release environment variables
         run: |
           echo "Release version: ${{ env.RELEASE_VERSION }}"
-          echo "Changelog body: ${{ env.changelog_body }}"
+          echo "Changelog body: $(cat artifacts/changelog.md)"
 
-      - name: Create a GitHub Release
+      - name: Get bumped Cargo files (Act)
+        if: env.ACT == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: bumped-cargo-files
+          path: ${{ github.workspace }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        name: Set Rust toolchain
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.use-cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Overwrite build command env variable
+        if: matrix.use-cross
+        shell: bash
+        run: echo "BUILD_CMD=cross" >> $GITHUB_ENV
+
+      - name: Install latest LLVM/Clang
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          # omit the version to get the latest stable for your Ubuntu (24.04 "noble" on ubuntu-latest)
+          sudo ./llvm.sh all
+          # ensure libclang dev package is present (adjust the "22" if a newer major exists)
+          sudo apt-get update
+          sudo apt-get install -y libclang-20-dev libclang-dev
+
+      - name: Show Version Information (Rust, cargo, GCC)
+        shell: bash
+        run: |
+          gcc --version || true
+          rustup -V
+          rustup toolchain list
+          rustup default
+          cargo -V
+          rustc -V
+
+      - name: Build
+        shell: bash
+        run: $BUILD_CMD build --locked --release --target=${{ matrix.target }} ${{ matrix.cargo-flags }}
+
+      - name: Verify file
+        shell: bash
+        run: |
+          file target/${{ matrix.target }}/release/gman
+
+      - name: Test
+        if: matrix.target != 'aarch64-apple-darwin' && matrix.target != 'aarch64-pc-windows-msvc'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if [[ "${{ matrix.use-cross || 'false' }}" == 'true' ]]; then
+            cross test --release --locked --target=${{ matrix.target }} --verbose
+          else
+            cargo test  --release --locked --target=${{ matrix.target }} --verbose
+          fi
+
+      - name: Build Archive
+        shell: bash
+        id: package
+        env:
+          target: ${{ matrix.target }}
+        run: |
+          set -euxo pipefail
+
+          bin=${GITHUB_REPOSITORY##*/}
+          dist_dir=`pwd`/dist
+          name=$bin-$target
+          executable=target/$target/release/$bin
+
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            executable=$executable.exe
+          fi
+
+          mkdir $dist_dir
+          cp $executable $dist_dir
+          cd $dist_dir
+
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+              archive=$dist_dir/$name.zip
+              sha=$dist_dir/$name.sha256
+              7z a $archive *
+              certutil -hashfile $archive sha256 | grep -E [A-Fa-f0-9]{64} > $sha
+              echo "archive=dist/$name.zip" >> $GITHUB_OUTPUT
+              echo "sha=dist/$name.sha256" >> $GITHUB_OUTPUT
+          else
+              archive=$dist_dir/$name.tar.gz
+              sha=$dist_dir/$name.sha256
+              tar -czf $archive *
+              shasum -a 256 $archive > $sha
+              echo "archive=dist/$name.tar.gz" >> $GITHUB_OUTPUT
+              echo "sha=dist/$name.sha256" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish Archive and SHA
         if: env.ACT != 'true'
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           files: |
-            artifacts/gman-macos-arm64.tar.gz
-            artifacts/gman-macos-arm64.sha256
-            artifacts/gman-macos.tar.gz
-            artifacts/gman-macos.sha256
-            artifacts/gman-windows.tar.gz
-            artifacts/gman-windows.sha256
-            artifacts/gman-windows-aarch64.tar.gz
-            artifacts/gman-windows-aarch64.sha256
-            artifacts/gman-linux.tar.gz
-            artifacts/gman-linux.sha256
-            artifacts/gman-linux-musl.tar.gz
-            artifacts/gman-linux-musl.sha256
-            artifacts/gman-aarch64-gnu.tar.gz
-            artifacts/gman-aarch64-gnu.sha256
-            artifacts/gman-aarch64-musl.tar.gz
-            artifacts/gman-aarch64-musl.sha256
-            artifacts/gman-armv6-gnu.tar.gz
-            artifacts/gman-armv6-gnu.sha256
-            artifacts/gman-armv6-musl.tar.gz
-            artifacts/gman-armv6-musl.sha256
-            artifacts/gman-armv7-gnu.tar.gz
-            artifacts/gman-armv7-gnu.sha256
-            artifacts/gman-armv7-musl.tar.gz
-            artifacts/gman-armv7-musl.sha256
+            ${{ steps.package.outputs.archive }} 
+            ${{ steps.package.outputs.sha }}
           tag_name: v${{ env.RELEASE_VERSION }}
-          name: 'v${{ env.RELEASE_VERSION }}'
-          body: ${{ env.changelog_body }}
-          draft: false
+          name: "v${{ env.RELEASE_VERSION }}"
+          body_path: artifacts/changelog.md
           prerelease: false
+
+      - name: Add artifacts
+        shell: bash
+        run: |
+          [[ -d artifacts ]] || mkdir -p artifacts
+          cp ${{ steps.package.outputs.archive }} artifacts/
+          cp ${{ steps.package.outputs.sha }} artifacts/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
+          name: artifacts-v${{ env.RELEASE_VERSION }}-${{ matrix.target }}
           path: artifacts
           overwrite: true
+
 
   publish-chocolatey-package:
     needs: [publish-github-release]
@@ -497,7 +383,7 @@ jobs:
         shell: pwsh
         run: |
           # Read the first column from the SHA256 file
-          $windows_sha = Get-Content ./artifacts/gman-windows.sha256 | ForEach-Object { $_.Split(' ')[0] }
+          $windows_sha = Get-Content ./artifacts/gman-x86_64-pc-windows-msvc.sha256 | ForEach-Object { $_.Split(' ')[0] }
           Add-Content -Path $env:GITHUB_ENV -Value "WINDOWS_SHA=$windows_sha"
 
           # Read the release version from the release-version file
@@ -520,10 +406,17 @@ jobs:
           # Publish to Chocolatey
           cd ./deployment/chocolatey
           choco pack
-          echo y | choco install gman -dv -s .
-          $version = gman --version
+          choco install gman --yes -dv -s .
+          # Verify install succeeded
+          choco list --local-only | Select-String '^gman ' | Out-Null
+          
+          # Run the EXE directly from the installed package folder
+          $exe = Get-ChildItem "$env:ChocolateyInstall\lib\gman\tools\gman*.exe" -ErrorAction Stop |
+          Select-Object -First 1 -ExpandProperty FullName
+          
+          $version = & $exe --version
           $version = $version -replace " ", "."
-          choco push $version.nupkg -s https://push.chocolatey.org/ --api-key ${{ secrets.CHOCOLATEY_API_KEY }};
+          choco push "$version.nupkg" -s https://push.chocolatey.org/ --api-key ${{ secrets.CHOCOLATEY_API_KEY }}
 
   publish-homebrew-formula:
     needs: [publish-github-release]
@@ -551,11 +444,11 @@ jobs:
         shell: bash
         run: |
           # Set environment variables
-          macos_sha="$(cat ./artifacts/gman-macos.sha256 | awk '{print $1}')"
+          macos_sha="$(cat ./artifacts/gman-x86_64-apple-darwin.sha256 | awk '{print $1}')"
           echo "MACOS_SHA=$macos_sha" >> $GITHUB_ENV
-          macos_sha_arm="$(cat ./artifacts/gman-macos-arm64.sha256 | awk '{print $1}')"
+          macos_sha_arm="$(cat ./artifacts/gman-aarch64-apple-darwin.sha256 | awk '{print $1}')"
           echo "MACOS_SHA_ARM=$macos_sha_arm" >> $GITHUB_ENV
-          linux_sha="$(cat ./artifacts/gman-linux-musl.sha256 | awk '{print $1}')"
+          linux_sha="$(cat ./artifacts/gman-x86_64-unknown-linux-musl.sha256 | awk '{print $1}')"
           echo "LINUX_SHA=$linux_sha" >> $GITHUB_ENV
           release_version="$(cat ./artifacts/release-version)"
           echo "RELEASE_VERSION=$release_version" >> $GITHUB_ENV
@@ -617,17 +510,6 @@ jobs:
         run: |
           git fetch --all
           git pull
-
-      - uses: actions/cache@v3
-        name: Cache Cargo registry
-        with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('Cargo.lock') }}
-
-      - uses: actions/cache@v3
-        with:
-          path: ~/.cargo/bin
-          key: ${{ runner.os }}-cargo-bin-${{ hashFiles('.github/workflows/release.yml') }}
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
