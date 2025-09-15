@@ -315,7 +315,7 @@ jobs:
           if [[ "$RUNNER_OS" == "Windows" ]]; then
               archive=$dist_dir/$name.exe
               sha=$dist_dir/$name.sha256
-              certutil -hashfile $archive sha256 | grep -E [A-Fa-f0-9]{64} > $sha
+              certutil -hashfile $name.exe sha256 | grep -E [A-Fa-f0-9]{64} > $sha
               echo "archive=dist/$name.exe" >> $GITHUB_OUTPUT
               echo "sha=dist/$name.sha256" >> $GITHUB_OUTPUT
           else
