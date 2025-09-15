@@ -126,7 +126,7 @@ jobs:
       - name: Generate changelog for the version bump
         id: changelog
         run: |
-          changelog=$(conventional-changelog -p conventionalcommits -i CHANGELOG.md --from ${{ env.prev_version }} --to v${{ env.version }})
+          changelog="$(conventional-changelog -p conventionalcommits -i CHANGELOG.md --from ${{ env.prev_version }} --to v${{ env.version }})"
           echo "$changelog" > artifacts/changelog.md
           echo "changelog_body=$(cat artifacts/changelog.md)" >> $GITHUB_ENV
 
