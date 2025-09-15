@@ -126,7 +126,7 @@ jobs:
       - name: Generate changelog for the version bump
         id: changelog
         run: |
-          changelog=$(conventional-changelog -p angular -i CHANGELOG.md -s --from ${{ env.prev_version }} --to ${{ env.version }})
+          changelog=$(conventional-changelog -p angular -i CHANGELOG.md --from ${{ env.prev_version }} --to ${{ env.version }})
           echo "$changelog" > artifacts/changelog.md
           echo "changelog_body=$(cat artifacts/changelog.md)" >> $GITHUB_ENV
 
@@ -356,7 +356,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: artifacts-${{ env.RELEASE_NAME }}
+          name: artifacts-v${{ env.RELEASE_VERSION }}
           path: artifacts
           overwrite: true
 
