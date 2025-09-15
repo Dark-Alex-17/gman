@@ -356,22 +356,17 @@ jobs:
           path: artifacts
           overwrite: true
 
-
-  publish-chocolatey-package:
+  publish-winget-package:
     needs: [publish-github-release]
-    name: Publish Chocolatey Package
+    name: Publish winget package
     runs-on: windows-latest
     steps:
       - name: Check if actor is repository owner
         if: ${{ github.actor != github.repository_owner  && env.ACT != 'true' }}
+        shell: bash
         run: |
           echo "You are not authorized to run this workflow."
           exit 1
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
 
       - name: Get release artifacts
         uses: actions/download-artifact@v4
@@ -379,44 +374,27 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      - name: Set release assets and version
-        shell: pwsh
+      - name: Set release version
+        shell: bash
         run: |
-          # Read the first column from the SHA256 file
-          $windows_sha = Get-Content ./artifacts/gman-x86_64-pc-windows-msvc.sha256 | ForEach-Object { $_.Split(' ')[0] }
-          Add-Content -Path $env:GITHUB_ENV -Value "WINDOWS_SHA=$windows_sha"
-
-          # Read the release version from the release-version file
-          $release_version = Get-Content ./artifacts/release-version
-          Add-Content -Path $env:GITHUB_ENV -Value "RELEASE_VERSION=$release_version"
+          release_version="$(cat ./artifacts/release-version)"
+          echo "RELEASE_VERSION=$release_version" >> $GITHUB_ENV
 
       - name: Validate release environment variables
+        shell: bash
         run: |
-          echo "Release SHA windows: ${{ env.WINDOWS_SHA }}"
           echo "Release version: ${{ env.RELEASE_VERSION }}"
 
-      - name: Package and Publish package to Chocolatey
+      - name: Publish to winget (opens PR to microsoft/winget-pkgs)
         if: env.ACT != 'true'
-        run: |
-          mkdir ./deployment/chocolatey/tools
-          # Run packaging script
-          python "./deployment/chocolatey/packager.py" ${{ env.RELEASE_VERSION }} "./deployment/chocolatey/gman.nuspec.template" "./deployment/chocolatey/gman.nuspec" ${{ env.WINDOWS_SHA }}
-          python "./deployment/chocolatey/packager.py" ${{ env.RELEASE_VERSION }} "./deployment/chocolatey/chocolateyinstall.ps1.template" "./deployment/chocolatey/tools/chocolateyinstall.ps1" ${{ env.WINDOWS_SHA }}
-
-          # Publish to Chocolatey
-          cd ./deployment/chocolatey
-          choco pack
-          choco install gman --yes -dv -s .
-          # Verify install succeeded
-          choco list --local-only | Select-String '^gman ' | Out-Null
-          
-          # Run the EXE directly from the installed package folder
-          $exe = Get-ChildItem "$env:ChocolateyInstall\lib\gman\tools\gman*.exe" -ErrorAction Stop |
-          Select-Object -First 1 -ExpandProperty FullName
-          
-          $version = & $exe --version
-          $version = $version -replace " ", "."
-          choco push "$version.nupkg" -s https://push.chocolatey.org/ --api-key ${{ secrets.CHOCOLATEY_API_KEY }}
+        uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: ${{ vars.WINGET_PACKAGE_IDENTIFIER }}
+          version: ${{ env.RELEASE_VERSION }}
+          token: ${{ secrets.WINGET_TOKEN }}
+          installers: |
+            https://github.com/${{ github.repository }}/releases/download/v${{ env.RELEASE_VERSION }}/gman-x86_64-pc-windows-msvc.zip
+            https://github.com/${{ github.repository }}/releases/download/v${{ env.RELEASE_VERSION }}/gman-aarch64-pc-windows-msvc.zip
 
   publish-homebrew-formula:
     needs: [publish-github-release]

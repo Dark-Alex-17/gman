@@ -133,23 +133,14 @@ To upgrade `gman` using Homebrew:
 brew upgrade gman
 ```
 
-### Chocolatey (Windows)
-The G-Man Chocolatey package is located [here](https://community.chocolatey.org/packages/gman). Please note that validation
-of Chocolatey packages take quite some time, and thus the package may not be available immediately after a new release.
+### Winget (Windows)
+To install G-Man using Winget:
 
 ```powershell
-choco install gman
+winget install gman
 
-# Some newer releases may require a version number, so you can specify it like so:
-choco install gman --version=0.1.0
-```
-
-To upgrade to the latest and greatest version of G-Man:
-```powershell
-choco upgrade gman
-
-# To upgrade to a specific version:
-choco upgrade gman --version=0.1.0
+# If you need to be more specific, use:
+winget install --id Dark-Alex-17.gman
 ```
 
 ### Manual
