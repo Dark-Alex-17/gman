@@ -352,7 +352,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: artifacts-v${{ env.RELEASE_VERSION }}
+          name: artifacts-v${{ env.RELEASE_VERSION }}-${{ matrix.target }}
           path: artifacts
           overwrite: true
 
