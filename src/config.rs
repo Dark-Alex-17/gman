@@ -19,6 +19,8 @@
 //! };
 //! rc.validate().unwrap();
 //! ```
+
+use collections::HashSet;
 use crate::providers::local::LocalProvider;
 use crate::providers::{SecretProvider, SupportedProvider};
 use anyhow::{Context, Result};
@@ -28,7 +30,7 @@ use serde_with::serde_as;
 use serde_with::skip_serializing_none;
 use std::borrow::Cow;
 use std::path::PathBuf;
-use std::{env, fs};
+use std::{collections, env, fs};
 use validator::{Validate, ValidationError};
 
 #[skip_serializing_none]
@@ -182,6 +184,7 @@ impl ProviderConfig {
 /// ```
 #[derive(Debug, Clone, Validate, Serialize, Deserialize, PartialEq, Eq)]
 #[validate(schema(function = "default_provider_exists"))]
+#[validate(schema(function = "providers_names_are_unique"))]
 pub struct Config {
     pub default_provider: Option<String>,
     #[validate(length(min = 1))]
@@ -209,6 +212,22 @@ fn default_provider_exists(config: &Config) -> Result<(), ValidationError> {
     } else {
         Ok(())
     }
+}
+
+fn providers_names_are_unique(config: &Config) -> Result<(), ValidationError> {
+		let mut names = HashSet::new();
+		for provider in &config.providers {
+				if let Some(name) = &provider.name {
+						if !names.insert(name) {
+								let mut err = ValidationError::new("duplicate_provider_name");
+								err.message = Some(Cow::Borrowed(
+										"Provider names must be unique; duplicate found",
+								));
+								return Err(err);
+						}
+				}
+		}
+		Ok(())
 }
 
 impl Default for Config {

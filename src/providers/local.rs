@@ -6,7 +6,10 @@ use std::{env, fs};
 use zeroize::Zeroize;
 
 use crate::config::{Config, get_config_file_path, load_config};
-use crate::providers::git_sync::{SyncOpts, repo_name_from_url, sync_and_push};
+use crate::providers::git_sync::{
+    SyncOpts, default_git_email, default_git_username, ensure_git_available, repo_name_from_url,
+    resolve_git, sync_and_push,
+};
 use crate::providers::{SecretProvider, SupportedProvider};
 use crate::{
     ARGON_M_COST_KIB, ARGON_P, ARGON_T_COST, HEADER, KDF, KEY_LEN, NONCE_LEN, SALT_LEN, VERSION,
@@ -156,6 +159,8 @@ impl SecretProvider for LocalProvider {
 
     async fn sync(&mut self) -> Result<()> {
         let mut config_changed = false;
+        let git = resolve_git(self.git_executable.as_ref())?;
+        ensure_git_available(&git)?;
 
         if self.git_branch.is_none() {
             config_changed = true;
@@ -187,6 +192,39 @@ impl SecretProvider for LocalProvider {
                 .interact_text()?;
 
             self.git_remote_url = Some(remote);
+        }
+
+        if self.git_user_name.is_none() {
+            config_changed = true;
+            debug!("Prompting user git user name");
+            let default_user_name = default_git_username(&git)?.trim().to_string();
+            let branch: String = Input::with_theme(&ColorfulTheme::default())
+                .with_prompt("Enter git user name")
+                .default(default_user_name)
+                .interact_text()?;
+
+            self.git_user_name = Some(branch);
+        }
+
+        if self.git_user_email.is_none() {
+            config_changed = true;
+            debug!("Prompting user git email");
+            let default_user_name = default_git_email(&git)?.trim().to_string();
+            let branch: String = Input::with_theme(&ColorfulTheme::default())
+                .with_prompt("Enter git user email")
+                .validate_with({
+                    |s: &String| {
+                        if s.contains('@') {
+                            Ok(())
+                        } else {
+                            Err("not a valid email address".to_string())
+                        }
+                    }
+                })
+                .default(default_user_name)
+                .interact_text()?;
+
+            self.git_user_email = Some(branch);
         }
 
         if config_changed {
@@ -223,6 +261,9 @@ impl LocalProvider {
                 if matches_name || target_name.is_none() {
                     provider_def.git_branch = self.git_branch.clone();
                     provider_def.git_remote_url = self.git_remote_url.clone();
+                    provider_def.git_user_name = self.git_user_name.clone();
+                    provider_def.git_user_email = self.git_user_email.clone();
+                    provider_def.git_executable = self.git_executable.clone();
 
                     updated = true;
                     if matches_name {
@@ -564,7 +605,7 @@ mod tests {
             .expect("persist ok");
 
         let content = fs::read_to_string(&cfg_path).unwrap();
-        let cfg: crate::config::Config = serde_yaml::from_str(&content).unwrap();
+        let cfg: Config = serde_yaml::from_str(&content).unwrap();
 
         assert_eq!(cfg.default_provider.as_deref(), Some("local"));
         assert!(cfg.run_configs.is_some());
@@ -578,6 +619,15 @@ mod tests {
                 assert_eq!(
                     provider_def.git_remote_url.as_deref(),
                     Some("git@github.com:user/repo.git")
+                );
+                assert_eq!(provider_def.git_user_name.as_deref(), Some("Test User"));
+                assert_eq!(
+                    provider_def.git_user_email.as_deref(),
+                    Some("test@example.com")
+                );
+                assert_eq!(
+                    provider_def.git_executable.as_ref(),
+                    Some(&PathBuf::from("/usr/bin/git"))
                 );
             }
             _ => panic!("expected local provider"),

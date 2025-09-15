@@ -1,3 +1,5 @@
+use anyhow::{Context, Result};
+use gman::config::{Config, get_config_file_path};
 use log::LevelFilter;
 use log4rs::append::console::ConsoleAppender;
 use log4rs::append::file::FileAppender;
@@ -58,6 +60,28 @@ pub fn get_log_path() -> PathBuf {
     };
 
     dir.join("gman.log")
+}
+
+pub fn persist_config_file(config: &Config) -> Result<()> {
+    let config_path =
+        get_config_file_path().with_context(|| "unable to determine config file path")?;
+    let ext = config_path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    if ext.eq_ignore_ascii_case("yml") || ext.eq_ignore_ascii_case("yaml") {
+        if let Some(parent) = config_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let s = serde_yaml::to_string(config)?;
+        fs::write(&config_path, s)
+            .with_context(|| format!("failed to write {}", config_path.display()))?;
+    } else {
+        confy::store("gman", "config", config)
+            .with_context(|| "failed to save updated config via confy")?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

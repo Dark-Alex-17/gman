@@ -116,8 +116,7 @@ fn resolve_git_username(git: &Path, name: Option<&String>) -> Result<String> {
         return Ok(name.to_string());
     }
 
-    run_git_config_capture(git, &["config", "user.name"])
-        .with_context(|| "unable to determine git username")
+    default_git_username(git)
 }
 
 fn resolve_git_email(git: &Path, email: Option<&String>) -> Result<String> {
@@ -126,11 +125,10 @@ fn resolve_git_email(git: &Path, email: Option<&String>) -> Result<String> {
         return Ok(email.to_string());
     }
 
-    run_git_config_capture(git, &["config", "user.email"])
-        .with_context(|| "unable to determine git user email")
+    default_git_email(git)
 }
 
-fn resolve_git(override_path: Option<&PathBuf>) -> Result<PathBuf> {
+pub(in crate::providers) fn resolve_git(override_path: Option<&PathBuf>) -> Result<PathBuf> {
     debug!("Resolving git executable");
     if let Some(p) = override_path {
         return Ok(p.to_path_buf());
@@ -141,7 +139,19 @@ fn resolve_git(override_path: Option<&PathBuf>) -> Result<PathBuf> {
     Ok(PathBuf::from("git"))
 }
 
-fn ensure_git_available(git: &Path) -> Result<()> {
+pub(in crate::providers) fn default_git_username(git: &Path) -> Result<String> {
+	debug!("Checking for default git username");
+	run_git_config_capture(git, &["config", "user.name"])
+		.with_context(|| "unable to determine git user name")
+}
+
+pub(in crate::providers) fn default_git_email(git: &Path) -> Result<String> {
+	debug!("Checking for default git username");
+	run_git_config_capture(git, &["config", "user.email"])
+		.with_context(|| "unable to determine git user email")
+}
+
+pub(in crate::providers) fn ensure_git_available(git: &Path) -> Result<()> {
     let ok = Command::new(git)
         .arg("--version")
         .stdout(Stdio::null())

@@ -1,19 +1,21 @@
+use anyhow::{Context, Result};
+use clap::Subcommand;
 use clap::{
     CommandFactory, Parser, ValueEnum, crate_authors, crate_description, crate_name, crate_version,
 };
-use std::ffi::OsString;
-
-use anyhow::{Context, Result};
-use clap::Subcommand;
 use crossterm::execute;
 use crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
-use gman::config::{get_config_file_path, load_config};
+use gman::config::{Config, get_config_file_path, load_config};
+use std::ffi::OsString;
 use std::io::{self, IsTerminal, Read, Write};
 use std::panic::PanicHookInfo;
 
 use crate::cli::wrap_and_run_command;
+use dialoguer::Editor;
 use std::panic;
 use std::process::exit;
+use validator::Validate;
+use crate::utils::persist_config_file;
 
 mod cli;
 mod command;
@@ -102,6 +104,9 @@ enum Commands {
 
     /// Sync secrets with remote storage (if supported by the provider)
     Sync {},
+
+    /// Open and edit the config file in the default text editor
+    Config {},
 
     /// Wrap the provided command and supply it with secrets as environment variables or as
     /// configured in a corresponding run profile
@@ -219,6 +224,26 @@ async fn main() -> Result<()> {
                     }
                 }
             }
+        }
+        Commands::Config {} => {
+            let config_yaml = serde_yaml::to_string(&config)
+                .with_context(|| "failed to serialize existing configuration")?;
+            let new_config = Editor::new()
+                .edit(&config_yaml)
+                .with_context(|| "unable to process user changes")?;
+            if new_config.is_none() {
+                println!("✗ No changes made to configuration");
+                return Ok(());
+            }
+
+            let new_config = new_config.unwrap();
+            let new_config: Config = serde_yaml::from_str(&new_config)
+                .with_context(|| "failed to parse updated configuration")?;
+            new_config
+                .validate()
+                .with_context(|| "updated configuration is invalid")?;
+						persist_config_file(&new_config)?;
+            println!("✓ Configuration updated successfully");
         }
         Commands::Sync {} => {
             secrets_provider.sync().await.map(|_| {
