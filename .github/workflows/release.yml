@@ -393,9 +393,9 @@ jobs:
           version: ${{ env.RELEASE_VERSION }}
           release-tag: v${{ env.RELEASE_VERSION }}
           token: ${{ secrets.WINGET_GITHUB_TOKEN }}
-          installers: |
-            https://github.com/${{ github.repository }}/releases/download/v${{ env.RELEASE_VERSION }}/gman-x86_64-pc-windows-msvc.zip
-            https://github.com/${{ github.repository }}/releases/download/v${{ env.RELEASE_VERSION }}/gman-aarch64-pc-windows-msvc.zip
+#          installers-regex: |
+#            https://github.com/${{ github.repository }}/releases/download/v${{ env.RELEASE_VERSION }}/gman-x86_64-pc-windows-msvc.zip
+#            https://github.com/${{ github.repository }}/releases/download/v${{ env.RELEASE_VERSION }}/gman-aarch64-pc-windows-msvc.zip
 
   publish-homebrew-formula:
     needs: [publish-github-release]
