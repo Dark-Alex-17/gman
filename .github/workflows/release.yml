@@ -407,12 +407,18 @@ jobs:
           cd ./deployment/chocolatey
           choco pack
           choco install gman --yes -dv -s .
-          $exe = Get-ChildItem "$env:ChocolateyInstall\lib\gman\tools\gman*.exe" -ErrorAction Stop | Select-Object -First 1 -Expand FullName
+          # Verify install succeeded
+          choco list --local-only | Select-String '^gman ' | Out-Null
+          
+          # Run the EXE directly from the installed package folder
+          $exe = Get-ChildItem "$env:ChocolateyInstall\lib\gman\tools\gman*.exe" -ErrorAction Stop |
+          Select-Object -First 1 -ExpandProperty FullName
+          
           $version = & $exe --version
           $version = $version -replace " ", "."
-          choco push $version.nupkg -s https://push.chocolatey.org/ --api-key ${{ secrets.CHOCOLATEY_API_KEY }};
+          choco push "$version.nupkg" -s https://push.chocolatey.org/ --api-key ${{ secrets.CHOCOLATEY_API_KEY }}
 
-  publish-homebrew-formula:
+publish-homebrew-formula:
     needs: [publish-github-release]
     name: Update Homebrew formulas
     runs-on: ubuntu-latest
