@@ -359,14 +359,18 @@ jobs:
   publish-winget-package:
     needs: [publish-github-release]
     name: Publish winget package
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - name: Check if actor is repository owner
         if: ${{ github.actor != github.repository_owner  && env.ACT != 'true' }}
-        shell: bash
         run: |
           echo "You are not authorized to run this workflow."
           exit 1
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Get release artifacts
         uses: actions/download-artifact@v4
@@ -381,19 +385,128 @@ jobs:
           echo "RELEASE_VERSION=$release_version" >> $GITHUB_ENV
 
       - name: Validate release environment variables
-        shell: bash
         run: |
           echo "Release version: ${{ env.RELEASE_VERSION }}"
 
+      - name: Check if winget package already exists
+        id: check
+        shell: bash
+        env:
+          IDENTIFIER: DarkAlex17.GMan
+        run: |
+          set -euo pipefail
+          publisher=${IDENTIFIER%%.*}
+          pkgname=${IDENTIFIER#*.}
+          first_letter=${publisher:0:1}
+          api_url="https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/$first_letter/$publisher/$pkgname"
+          status=$(curl -s -o /dev/null -w "%{http_code}" "$api_url")
+          if [[ "$status" == "200" ]]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare manifests for first submission
+        if: steps.check.outputs.exists == 'false' && env.ACT != 'true'
+        env:
+          IDENTIFIER: DarkAlex17.GMan
+          RELEASE_VERSION: ${{ env.RELEASE_VERSION }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          publisher=${IDENTIFIER%%.*}
+          pkgname=${IDENTIFIER#*.}
+          desc="$(grep -m1 '^description\s*=\s*"' Cargo.toml | sed -E 's/^[^\"]+\"(.*)\"/\1/')"
+          license="$(grep -m1 '^license\s*=\s*"' Cargo.toml | sed -E 's/^[^\"]+\"(.*)\"/\1/')"
+
+          # Compute SHAs from artifacts
+          x64_sha=$(awk '{print $1}' artifacts/gman-x86_64-pc-windows-msvc.sha256)
+          arm64_sha=$(awk '{print $1}' artifacts/gman-aarch64-pc-windows-msvc.sha256)
+
+          # Release URLs
+          url_x64="https://github.com/$REPO/releases/download/v$RELEASE_VERSION/gman-x86_64-pc-windows-msvc.zip"
+          url_arm64="https://github.com/$REPO/releases/download/v$RELEASE_VERSION/gman-aarch64-pc-windows-msvc.zip"
+
+          # Create temporary manifest directory
+          root="winget-manifests/manifests/${publisher:0:1}/$publisher/$pkgname/$RELEASE_VERSION"
+          mkdir -p "$root"
+
+          cat > "$root/$IDENTIFIER.yaml" <<YAML
+          PackageIdentifier: $IDENTIFIER
+          PackageVersion: $RELEASE_VERSION
+          DefaultLocale: en-US
+          ManifestType: version
+          ManifestVersion: 1.6.0
+          YAML
+
+          cat > "$root/$IDENTIFIER.locale.en-US.yaml" <<YAML
+          PackageIdentifier: $IDENTIFIER
+          PackageVersion: $RELEASE_VERSION
+          PackageLocale: en-US
+          Publisher: $publisher
+          PackageName: $pkgname
+          Moniker: gman
+          License: $license
+          ShortDescription: $desc
+          PublisherUrl: https://github.com/$publisher
+          PackageUrl: https://github.com/$REPO
+          ManifestType: defaultLocale
+          ManifestVersion: 1.6.0
+          YAML
+
+          cat > "$root/$IDENTIFIER.installer.yaml" <<YAML
+          PackageIdentifier: $IDENTIFIER
+          PackageVersion: $RELEASE_VERSION
+          InstallerType: zip
+          Installers:
+            - Architecture: x64
+              InstallerUrl: $url_x64
+              InstallerSha256: $x64_sha
+              NestedInstallerType: portable
+              NestedInstallerFiles:
+                - RelativeFilePath: gman.exe
+                  PortableCommandAlias: gman
+            - Architecture: arm64
+              InstallerUrl: $url_arm64
+              InstallerSha256: $arm64_sha
+              NestedInstallerType: portable
+              NestedInstallerFiles:
+                - RelativeFilePath: gman.exe
+                  PortableCommandAlias: gman
+          ManifestType: installer
+          ManifestVersion: 1.6.0
+          YAML
+
+          echo "Prepared manifests in $root"
+
+      - name: Install .NET for WingetCreate
+        if: steps.check.outputs.exists == 'false' && env.ACT != 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install WingetCreate tool
+        if: steps.check.outputs.exists == 'false' && env.ACT != 'true'
+        run: |
+          dotnet tool install --global wingetcreate
+          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+
+      - name: Submit initial package to winget-pkgs
+        if: steps.check.outputs.exists == 'false' && env.ACT != 'true'
+        env:
+          TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          wingetcreate submit winget-manifests/manifests --submit --token "$TOKEN" --owner microsoft
+
       - name: Publish to winget (opens PR to microsoft/winget-pkgs)
-        if: env.ACT != 'true'
-        uses: vedantmgoyal9/winget-releaser@v2
+        if: steps.check.outputs.exists == 'true' && env.ACT != 'true'
+        uses: vedantmgoyal2009/winget-releaser@v2
         with:
           identifier: DarkAlex17.GMan
           version: ${{ env.RELEASE_VERSION }}
           release-tag: v${{ env.RELEASE_VERSION }}
-          token: ${{ secrets.WINGET_GITHUB_TOKEN }}
-          installers-regex: 'gman-x86_64-pc-windows-msvc.exe$'
+          token: ${{ secrets.WINGET_TOKEN }}
 
   publish-homebrew-formula:
     needs: [publish-github-release]
