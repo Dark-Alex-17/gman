@@ -313,11 +313,12 @@ jobs:
           cd $dist_dir
 
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            mv gman.exe $name.exe
-            archive=$dist_dir/$name.exe
+            # mv gman.exe $name.exe
+            archive=$dist_dir/$name.zip
             sha=$dist_dir/$name.sha256
-            certutil -hashfile $name.exe sha256 | grep -E [A-Fa-f0-9]{64} > $sha
-            echo "archive=dist/$name.exe" >> $GITHUB_OUTPUT
+            7z a $archive *
+            certutil -hashfile $archive sha256 | grep -E [A-Fa-f0-9]{64} > $sha
+            echo "archive=dist/$name.zip" >> $GITHUB_OUTPUT
             echo "sha=dist/$name.sha256" >> $GITHUB_OUTPUT
           else
             archive=$dist_dir/$name.tar.gz
@@ -474,7 +475,7 @@ jobs:
                 - RelativeFilePath: gman.exe
                   PortableCommandAlias: gman
           ManifestType: installer
-          ManifestVersion: 1.6.0
+          ManifestVersion: 1.10.0
           YAML
 
           echo "Prepared manifests in $root"
@@ -488,8 +489,7 @@ jobs:
       - name: Install WingetCreate tool
         if: steps.check.outputs.exists == 'false' && env.ACT != 'true'
         run: |
-          dotnet tool install --global wingetcreate
-          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+          winget install wingetcreate
 
       - name: Submit initial package to winget-pkgs
         if: steps.check.outputs.exists == 'false' && env.ACT != 'true'
@@ -501,12 +501,13 @@ jobs:
 
       - name: Publish to winget (opens PR to microsoft/winget-pkgs)
         if: steps.check.outputs.exists == 'true' && env.ACT != 'true'
-        uses: vedantmgoyal2009/winget-releaser@v2
+        uses: vedantmgoyal9/winget-releaser@v2
         with:
           identifier: DarkAlex17.GMan
           version: ${{ env.RELEASE_VERSION }}
           release-tag: v${{ env.RELEASE_VERSION }}
-          token: ${{ secrets.WINGET_TOKEN }}
+          installers-regex: '\.zip$'
+          token: ${{ secrets.WINGET_GITHUB_TOKEN }}
 
   publish-homebrew-formula:
     needs: [publish-github-release]
