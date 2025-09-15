@@ -391,6 +391,7 @@ jobs:
         with:
           identifier: ${{ vars.WINGET_PACKAGE_IDENTIFIER }}
           version: ${{ env.RELEASE_VERSION }}
+          tag: v${{ env.RELEASE_VERSION }}
           token: ${{ secrets.WINGET_TOKEN }}
           installers: |
             https://github.com/${{ github.repository }}/releases/download/v${{ env.RELEASE_VERSION }}/gman-x86_64-pc-windows-msvc.zip
