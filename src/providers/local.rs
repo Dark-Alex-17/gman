@@ -172,7 +172,7 @@ impl SecretProvider for LocalProvider {
             config_changed = true;
             debug!("Prompting user to set git_remote in config for sync");
             let remote: String = Input::with_theme(&ColorfulTheme::default())
-                .with_prompt("Enter remote git URL to sync with")
+                .with_prompt("Enter remote git URL to sync with (e.g. 'git@github.com:user/repo.git')")
                 .validate_with(|s: &String| {
                     LocalProvider {
                         git_remote_url: Some(s.clone()),
@@ -221,9 +221,7 @@ impl LocalProvider {
                 if matches_name || target_name.is_none() {
                     provider_def.git_branch = self.git_branch.clone();
                     provider_def.git_remote_url = self.git_remote_url.clone();
-                    provider_def.git_user_name = self.git_user_name.clone();
-                    provider_def.git_user_email = self.git_user_email.clone();
-                    provider_def.git_executable = self.git_executable.clone();
+
                     updated = true;
                     if matches_name {
                         break;
@@ -251,6 +249,7 @@ impl LocalProvider {
 
         Ok(())
     }
+
     fn repo_dir_for_config(&self) -> Result<Option<PathBuf>> {
         if let Some(remote) = &self.git_remote_url {
             let name = repo_name_from_url(remote);
