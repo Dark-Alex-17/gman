@@ -126,9 +126,7 @@ jobs:
       - name: Generate changelog for the version bump
         id: changelog
         run: |
-          changelog="$(conventional-changelog -p conventionalcommits -i CHANGELOG.md --from ${{ env.prev_version }} --to v${{ env.version }})"
-          echo "$changelog" > artifacts/changelog.md
-          echo "changelog_body=$(cat artifacts/changelog.md)" >> $GITHUB_ENV
+          conventional-changelog -p conventionalcommits -i CHANGELOG.md --from ${{ env.prev_version }} --to v${{ env.version }} > artifacts/changelog.md
 
       - name: Push changes
         if: env.ACT != 'true'
@@ -343,7 +341,7 @@ jobs:
             ${{ steps.package.outputs.sha }}
           tag_name: v${{ env.RELEASE_VERSION }}
           name: "v${{ env.RELEASE_VERSION }}"
-          body: ${{ env.changelog_body }}
+          body_path: artifacts/changelog.md
           prerelease: false
 
       - name: Add artifacts
