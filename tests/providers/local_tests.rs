@@ -34,6 +34,7 @@ fn test_local_provider_valid() {
         git_user_name: None,
         git_user_email: Some("test@example.com".to_string()),
         git_executable: None,
+        runtime_provider_name: None,
     };
 
     assert!(provider.validate().is_ok());
@@ -48,6 +49,7 @@ fn test_local_provider_invalid_email() {
         git_user_name: None,
         git_user_email: Some("test".to_string()),
         git_executable: None,
+        runtime_provider_name: None,
     };
 
     assert!(config.validate().is_err());
