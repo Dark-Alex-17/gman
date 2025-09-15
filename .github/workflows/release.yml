@@ -432,51 +432,45 @@ jobs:
           root="winget-manifests/manifests/${publisher:0:1}/$publisher/$pkgname/$RELEASE_VERSION"
           mkdir -p "$root"
 
-          cat > "$root/$IDENTIFIER.yaml" <<YAML
-          PackageIdentifier: $IDENTIFIER
-          PackageVersion: $RELEASE_VERSION
-          DefaultLocale: en-US
-          ManifestType: version
-          ManifestVersion: 1.6.0
-          YAML
+          echo "PackageIdentifier: $IDENTIFIER" >> "$root/$IDENTIFIER.yaml"
+          echo "PackageVersion: $RELEASE_VERSION" >> "$root/$IDENTIFIER.yaml"
+          echo "DefaultLocale: en-US" >> "$root/$IDENTIFIER.yaml"
+          echo "ManifestType: version" >> "$root/$IDENTIFIER.yaml"
+          echo "ManifestVersion: 1.6.0" >> "$root/$IDENTIFIER.yaml"
 
-          cat > "$root/$IDENTIFIER.locale.en-US.yaml" <<YAML
-          PackageIdentifier: $IDENTIFIER
-          PackageVersion: $RELEASE_VERSION
-          PackageLocale: en-US
-          Publisher: $publisher
-          PackageName: $pkgname
-          Moniker: gman
-          License: $license
-          ShortDescription: $desc
-          PublisherUrl: https://github.com/$publisher
-          PackageUrl: https://github.com/$REPO
-          ManifestType: defaultLocale
-          ManifestVersion: 1.6.0
-          YAML
+          echo "PackageIdentifier: $IDENTIFIER" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+          echo "PackageVersion: $RELEASE_VERSION" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+          echo "PackageLocale: en-US" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+          echo "Publisher: $publisher" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+          echo "PackageName: $pkgname" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+          echo "Moniker: gman" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+          echo "License: $license" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+          echo "ShortDescription: $desc" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+          echo "PublisherUrl: https://github.com/$publisher" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+          echo "PackageUrl: https://github.com/$REPO" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+          echo "ManifestType: defaultLocale" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+          echo "ManifestVersion: 1.6.0" >> "$root/$IDENTIFIER.locale.en-US.yaml"
 
-          cat > "$root/$IDENTIFIER.installer.yaml" <<YAML
-          PackageIdentifier: $IDENTIFIER
-          PackageVersion: $RELEASE_VERSION
-          InstallerType: zip
-          Installers:
-            - Architecture: x64
-              InstallerUrl: $url_x64
-              InstallerSha256: $x64_sha
-              NestedInstallerType: portable
-              NestedInstallerFiles:
-                - RelativeFilePath: gman.exe
-                  PortableCommandAlias: gman
-            - Architecture: arm64
-              InstallerUrl: $url_arm64
-              InstallerSha256: $arm64_sha
-              NestedInstallerType: portable
-              NestedInstallerFiles:
-                - RelativeFilePath: gman.exe
-                  PortableCommandAlias: gman
-          ManifestType: installer
-          ManifestVersion: 1.10.0
-          YAML
+          echo "PackageIdentifier: $IDENTIFIER" >> "$root/$IDENTIFIER.installer.yaml"
+          echo "PackageVersion: $RELEASE_VERSION" >> "$root/$IDENTIFIER.installer.yaml"
+          echo "InstallerType: zip" >> "$root/$IDENTIFIER.installer.yaml"
+          echo "Installers:" >> "$root/$IDENTIFIER.installer.yaml"
+          echo "  - Architecture: x64" >> "$root/$IDENTIFIER.installer.yaml"
+          echo "    InstallerUrl: $url_x64" >> "$root/$IDENTIFIER.installer.yaml"
+          echo "    InstallerSha256: $x64_sha" >> "$root/$IDENTIFIER.installer.yaml"
+          echo "    NestedInstallerType: portable" >> "$root/$IDENTIFIER.installer.yaml"
+          echo "    NestedInstallerFiles:" >> "$root/$IDENTIFIER.installer.yaml"
+          echo "      - RelativeFilePath: gman.exe" >> "$root/$IDENTIFIER.installer.yaml"
+          echo "        PortableCommandAlias: gman" >> "$root/$IDENTIFIER.installer.yaml"
+          echo "  - Architecture: arm64" >> "$root/$IDENTIFIER.installer.yaml"
+          echo "    InstallerUrl: $url_arm64" >> "$root/$IDENTIFIER.installer.yaml"
+          echo "    InstallerSha256: $arm64_sha" >> "$root/$IDENTIFIER.installer.yaml"
+          echo "    NestedInstallerType: portable" >> "$root/$IDENTIFIER.installer.yaml"
+          echo "    NestedInstallerFiles:" >> "$root/$IDENTIFIER.installer.yaml"
+          echo "      - RelativeFilePath: gman.exe" >> "$root/$IDENTIFIER.installer.yaml"
+          echo "        PortableCommandAlias: gman" >> "$root/$IDENTIFIER.installer.yaml"
+          echo "ManifestType: installer" >> "$root/$IDENTIFIER.installer.yaml"
+          echo "ManifestVersion: 1.10.0" >> "$root/$IDENTIFIER.installer.yaml"
 
           echo "Prepared manifests in $root"
 
