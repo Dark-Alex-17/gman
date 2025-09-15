@@ -406,8 +406,9 @@ jobs:
           # Publish to Chocolatey
           cd ./deployment/chocolatey
           choco pack
-          echo y | choco install gman -dv -s .
-          $version = gman.exe --version
+          choco install gman --yes -dv -s .
+          $exe = Get-ChildItem "$env:ChocolateyInstall\lib\gman\tools\gman*.exe" -ErrorAction Stop | Select-Object -First 1 -Expand FullName
+          $version = & $exe --version
           $version = $version -replace " ", "."
           choco push $version.nupkg -s https://push.chocolatey.org/ --api-key ${{ secrets.CHOCOLATEY_API_KEY }};
 
