@@ -172,7 +172,9 @@ impl SecretProvider for LocalProvider {
             config_changed = true;
             debug!("Prompting user to set git_remote in config for sync");
             let remote: String = Input::with_theme(&ColorfulTheme::default())
-                .with_prompt("Enter remote git URL to sync with (e.g. 'git@github.com:user/repo.git')")
+                .with_prompt(
+                    "Enter remote git URL to sync with (e.g. 'git@github.com:user/repo.git')",
+                )
                 .validate_with(|s: &String| {
                     LocalProvider {
                         git_remote_url: Some(s.clone()),
