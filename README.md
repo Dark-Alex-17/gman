@@ -1,4 +1,4 @@
-# G-Man - Universal CLI Credential Manager and Injection Tool
+# G-Man - Universal Command Line Secret Manager and Injection Tool
 
 ![Check](https://github.com/Dark-Alex-17/gman/actions/workflows/check.yml/badge.svg)
 ![Test](https://github.com/Dark-Alex-17/gman/actions/workflows/test.yml/badge.svg)
