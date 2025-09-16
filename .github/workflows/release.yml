@@ -313,7 +313,6 @@ jobs:
           cd $dist_dir
 
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            # mv gman.exe $name.exe
             archive=$dist_dir/$name.zip
             sha=$dist_dir/$name.sha256
             7z a $archive *
@@ -364,6 +363,7 @@ jobs:
     steps:
       - name: Check if actor is repository owner
         if: ${{ github.actor != github.repository_owner  && env.ACT != 'true' }}
+        shell: bash
         run: |
           echo "You are not authorized to run this workflow."
           exit 1
@@ -386,115 +386,121 @@ jobs:
           echo "RELEASE_VERSION=$release_version" >> $GITHUB_ENV
 
       - name: Validate release environment variables
+        shell: bash
         run: |
           echo "Release version: ${{ env.RELEASE_VERSION }}"
 
-      - name: Check if winget package already exists
-        id: check
-        shell: bash
-        env:
-          IDENTIFIER: DarkAlex17.GMan
-        run: |
-          set -euo pipefail
-          publisher=${IDENTIFIER%%.*}
-          pkgname=${IDENTIFIER#*.}
-          first_letter=${publisher:0:1}
-          api_url="https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/$first_letter/$publisher/$pkgname"
-          status=$(curl -s -o /dev/null -w "%{http_code}" "$api_url")
-          if [[ "$status" == "200" ]]; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Prepare manifests for first submission
-        if: steps.check.outputs.exists == 'false' && env.ACT != 'true'
-        env:
-          IDENTIFIER: DarkAlex17.GMan
-          RELEASE_VERSION: ${{ env.RELEASE_VERSION }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          publisher=${IDENTIFIER%%.*}
-          pkgname=${IDENTIFIER#*.}
-          desc="$(grep -m1 '^description\s*=\s*"' Cargo.toml | sed -E 's/^[^\"]+\"(.*)\"/\1/')"
-          license="$(grep -m1 '^license\s*=\s*"' Cargo.toml | sed -E 's/^[^\"]+\"(.*)\"/\1/')"
-
-          # Compute SHAs from artifacts
-          x64_sha=$(awk '{print $1}' artifacts/gman-x86_64-pc-windows-msvc.sha256)
-          arm64_sha=$(awk '{print $1}' artifacts/gman-aarch64-pc-windows-msvc.sha256)
-
-          # Release URLs
-          url_x64="https://github.com/$REPO/releases/download/v$RELEASE_VERSION/gman-x86_64-pc-windows-msvc.zip"
-          url_arm64="https://github.com/$REPO/releases/download/v$RELEASE_VERSION/gman-aarch64-pc-windows-msvc.zip"
-
-          # Create temporary manifest directory
-          root="winget-manifests/manifests/${publisher:0:1}/$publisher/$pkgname/$RELEASE_VERSION"
-          mkdir -p "$root"
-
-          echo "PackageIdentifier: $IDENTIFIER" >> "$root/$IDENTIFIER.yaml"
-          echo "PackageVersion: $RELEASE_VERSION" >> "$root/$IDENTIFIER.yaml"
-          echo "DefaultLocale: en-US" >> "$root/$IDENTIFIER.yaml"
-          echo "ManifestType: version" >> "$root/$IDENTIFIER.yaml"
-          echo "ManifestVersion: 1.6.0" >> "$root/$IDENTIFIER.yaml"
-
-          echo "PackageIdentifier: $IDENTIFIER" >> "$root/$IDENTIFIER.locale.en-US.yaml"
-          echo "PackageVersion: $RELEASE_VERSION" >> "$root/$IDENTIFIER.locale.en-US.yaml"
-          echo "PackageLocale: en-US" >> "$root/$IDENTIFIER.locale.en-US.yaml"
-          echo "Publisher: $publisher" >> "$root/$IDENTIFIER.locale.en-US.yaml"
-          echo "PackageName: $pkgname" >> "$root/$IDENTIFIER.locale.en-US.yaml"
-          echo "Moniker: gman" >> "$root/$IDENTIFIER.locale.en-US.yaml"
-          echo "License: $license" >> "$root/$IDENTIFIER.locale.en-US.yaml"
-          echo "ShortDescription: $desc" >> "$root/$IDENTIFIER.locale.en-US.yaml"
-          echo "PublisherUrl: https://github.com/$publisher" >> "$root/$IDENTIFIER.locale.en-US.yaml"
-          echo "PackageUrl: https://github.com/$REPO" >> "$root/$IDENTIFIER.locale.en-US.yaml"
-          echo "ManifestType: defaultLocale" >> "$root/$IDENTIFIER.locale.en-US.yaml"
-          echo "ManifestVersion: 1.6.0" >> "$root/$IDENTIFIER.locale.en-US.yaml"
-
-          echo "PackageIdentifier: $IDENTIFIER" >> "$root/$IDENTIFIER.installer.yaml"
-          echo "PackageVersion: $RELEASE_VERSION" >> "$root/$IDENTIFIER.installer.yaml"
-          echo "InstallerType: zip" >> "$root/$IDENTIFIER.installer.yaml"
-          echo "Installers:" >> "$root/$IDENTIFIER.installer.yaml"
-          echo "  - Architecture: x64" >> "$root/$IDENTIFIER.installer.yaml"
-          echo "    InstallerUrl: $url_x64" >> "$root/$IDENTIFIER.installer.yaml"
-          echo "    InstallerSha256: $x64_sha" >> "$root/$IDENTIFIER.installer.yaml"
-          echo "    NestedInstallerType: portable" >> "$root/$IDENTIFIER.installer.yaml"
-          echo "    NestedInstallerFiles:" >> "$root/$IDENTIFIER.installer.yaml"
-          echo "      - RelativeFilePath: gman.exe" >> "$root/$IDENTIFIER.installer.yaml"
-          echo "        PortableCommandAlias: gman" >> "$root/$IDENTIFIER.installer.yaml"
-          echo "  - Architecture: arm64" >> "$root/$IDENTIFIER.installer.yaml"
-          echo "    InstallerUrl: $url_arm64" >> "$root/$IDENTIFIER.installer.yaml"
-          echo "    InstallerSha256: $arm64_sha" >> "$root/$IDENTIFIER.installer.yaml"
-          echo "    NestedInstallerType: portable" >> "$root/$IDENTIFIER.installer.yaml"
-          echo "    NestedInstallerFiles:" >> "$root/$IDENTIFIER.installer.yaml"
-          echo "      - RelativeFilePath: gman.exe" >> "$root/$IDENTIFIER.installer.yaml"
-          echo "        PortableCommandAlias: gman" >> "$root/$IDENTIFIER.installer.yaml"
-          echo "ManifestType: installer" >> "$root/$IDENTIFIER.installer.yaml"
-          echo "ManifestVersion: 1.10.0" >> "$root/$IDENTIFIER.installer.yaml"
-
-          echo "Prepared manifests in $root"
-
-      - name: Install .NET for WingetCreate
-        if: steps.check.outputs.exists == 'false' && env.ACT != 'true'
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-
-      - name: Install WingetCreate tool
-        if: steps.check.outputs.exists == 'false' && env.ACT != 'true'
-        run: |
-          winget install wingetcreate
-
-      - name: Submit initial package to winget-pkgs
-        if: steps.check.outputs.exists == 'false' && env.ACT != 'true'
-        env:
-          TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          wingetcreate submit winget-manifests/manifests --submit --token "$TOKEN" --owner microsoft
+#      - name: Check if winget package already exists
+#        id: check
+#        shell: bash
+#        env:
+#          IDENTIFIER: DarkAlex17.GMan
+#        run: |
+#          set -euo pipefail
+#          publisher=${IDENTIFIER%%.*}
+#          pkgname=${IDENTIFIER#*.}
+#          first_letter=${publisher:0:1}
+#          api_url="https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/$first_letter/$publisher/$pkgname"
+#          status=$(curl -s -o /dev/null -w "%{http_code}" "$api_url")
+#          if [[ "$status" == "200" ]]; then
+#            echo "exists=true" >> "$GITHUB_OUTPUT"
+#          else
+#            echo "exists=false" >> "$GITHUB_OUTPUT"
+#          fi
+#
+#      - name: Prepare manifests for first submission
+#        if: steps.check.outputs.exists == 'false' && env.ACT != 'true'
+#        shell: bash
+#        env:
+#          IDENTIFIER: DarkAlex17.GMan
+#          RELEASE_VERSION: ${{ env.RELEASE_VERSION }}
+#          REPO: ${{ github.repository }}
+#        run: |
+#          set -euo pipefail
+#          publisher=${IDENTIFIER%%.*}
+#          pkgname=${IDENTIFIER#*.}
+#          desc="$(grep -m1 '^description\s*=\s*"' Cargo.toml | sed -E 's/^[^\"]+\"(.*)\"/\1/')"
+#          license="$(grep -m1 '^license\s*=\s*"' Cargo.toml | sed -E 's/^[^\"]+\"(.*)\"/\1/')"
+#
+#          # Compute SHAs from artifacts
+#          x64_sha=$(awk '{print $1}' artifacts/gman-x86_64-pc-windows-msvc.sha256)
+#          arm64_sha=$(awk '{print $1}' artifacts/gman-aarch64-pc-windows-msvc.sha256)
+#
+#          # Release URLs
+#          url_x64="https://github.com/$REPO/releases/download/v$RELEASE_VERSION/gman-x86_64-pc-windows-msvc.zip"
+#          url_arm64="https://github.com/$REPO/releases/download/v$RELEASE_VERSION/gman-aarch64-pc-windows-msvc.zip"
+#
+#          # Create temporary manifest directory
+#          root="winget-manifests/manifests/${publisher:0:1}/$publisher/$pkgname/$RELEASE_VERSION"
+#          mkdir -p "$root"
+#
+#          echo "PackageIdentifier: $IDENTIFIER" >> "$root/$IDENTIFIER.yaml"
+#          echo "PackageVersion: $RELEASE_VERSION" >> "$root/$IDENTIFIER.yaml"
+#          echo "DefaultLocale: en-US" >> "$root/$IDENTIFIER.yaml"
+#          echo "ManifestType: version" >> "$root/$IDENTIFIER.yaml"
+#          echo "ManifestVersion: 1.10.0" >> "$root/$IDENTIFIER.yaml"
+#
+#          echo "PackageIdentifier: $IDENTIFIER" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+#          echo "PackageVersion: $RELEASE_VERSION" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+#          echo "PackageLocale: en-US" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+#          echo "Publisher: $publisher" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+#          echo "PackageName: $pkgname" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+#          echo "PublisherUrl: https://github.com/$REPO" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+#          echo "PublisherSupportUrl: https://github.com/$REPO/issues" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+#          echo "Author: Dark-Alex-17" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+#          echo "Moniker: gman" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+#          echo "License: $license" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+#          echo "LicenseUrl: https://github.com/$REPO/blob/main/LICENSE" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+#          echo "ShortDescription: $desc" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+#          echo "ManifestType: defaultLocale" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+#          echo "ManifestVersion: 1.10.0" >> "$root/$IDENTIFIER.locale.en-US.yaml"
+#
+#          echo "PackageIdentifier: $IDENTIFIER" >> "$root/$IDENTIFIER.installer.yaml"
+#          echo "PackageVersion: $RELEASE_VERSION" >> "$root/$IDENTIFIER.installer.yaml"
+#          echo "InstallerType: zip" >> "$root/$IDENTIFIER.installer.yaml"
+#          echo "Installers:" >> "$root/$IDENTIFIER.installer.yaml"
+#          echo "  - Architecture: x64" >> "$root/$IDENTIFIER.installer.yaml"
+#          echo "    InstallerUrl: $url_x64" >> "$root/$IDENTIFIER.installer.yaml"
+#          echo "    InstallerSha256: $x64_sha" >> "$root/$IDENTIFIER.installer.yaml"
+#          echo "    NestedInstallerType: portable" >> "$root/$IDENTIFIER.installer.yaml"
+#          echo "    NestedInstallerFiles:" >> "$root/$IDENTIFIER.installer.yaml"
+#          echo "      - RelativeFilePath: gman.exe" >> "$root/$IDENTIFIER.installer.yaml"
+#          echo "        PortableCommandAlias: gman" >> "$root/$IDENTIFIER.installer.yaml"
+#          echo "  - Architecture: arm64" >> "$root/$IDENTIFIER.installer.yaml"
+#          echo "    InstallerUrl: $url_arm64" >> "$root/$IDENTIFIER.installer.yaml"
+#          echo "    InstallerSha256: $arm64_sha" >> "$root/$IDENTIFIER.installer.yaml"
+#          echo "    NestedInstallerType: portable" >> "$root/$IDENTIFIER.installer.yaml"
+#          echo "    NestedInstallerFiles:" >> "$root/$IDENTIFIER.installer.yaml"
+#          echo "      - RelativeFilePath: gman.exe" >> "$root/$IDENTIFIER.installer.yaml"
+#          echo "        PortableCommandAlias: gman" >> "$root/$IDENTIFIER.installer.yaml"
+#          echo "ManifestType: installer" >> "$root/$IDENTIFIER.installer.yaml"
+#          echo "ManifestVersion: 1.10.0" >> "$root/$IDENTIFIER.installer.yaml"
+#
+#          echo "Prepared manifests in $root"
+#
+#      - name: Install .NET for WingetCreate
+#        if: steps.check.outputs.exists == 'false' && env.ACT != 'true'
+#        uses: actions/setup-dotnet@v4
+#        with:
+#          dotnet-version: '8.0.x'
+#
+#      - name: Install WingetCreate tool
+#        if: steps.check.outputs.exists == 'false' && env.ACT != 'true'
+#        run: |
+#          winget install wingetcreate
+#
+#      - name: Submit initial package to winget-pkgs
+#        if: steps.check.outputs.exists == 'false' && env.ACT != 'true'
+#        shell: bash
+#        env:
+#          TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
+#        run: |
+#          set -euo pipefail
+#          wingetcreate submit winget-manifests/manifests --submit --token "$TOKEN" --owner microsoft
 
       - name: Publish to winget (opens PR to microsoft/winget-pkgs)
-        if: steps.check.outputs.exists == 'true' && env.ACT != 'true'
+        if: env.ACT != 'true'
+#        if: steps.check.outputs.exists == 'true' && env.ACT != 'true'
         uses: vedantmgoyal9/winget-releaser@v2
         with:
           identifier: DarkAlex17.GMan
@@ -503,103 +509,103 @@ jobs:
           installers-regex: '\.zip$'
           token: ${{ secrets.WINGET_GITHUB_TOKEN }}
 
-  publish-homebrew-formula:
-    needs: [publish-github-release]
-    name: Update Homebrew formulas
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check if actor is repository owner
-        if: ${{ github.actor != github.repository_owner  && env.ACT != 'true' }}
-        run: |
-          echo "You are not authorized to run this workflow."
-          exit 1
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Get release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Set release assets and version
-        shell: bash
-        run: |
-          # Set environment variables
-          macos_sha="$(cat ./artifacts/gman-x86_64-apple-darwin.sha256 | awk '{print $1}')"
-          echo "MACOS_SHA=$macos_sha" >> $GITHUB_ENV
-          macos_sha_arm="$(cat ./artifacts/gman-aarch64-apple-darwin.sha256 | awk '{print $1}')"
-          echo "MACOS_SHA_ARM=$macos_sha_arm" >> $GITHUB_ENV
-          linux_sha="$(cat ./artifacts/gman-x86_64-unknown-linux-musl.sha256 | awk '{print $1}')"
-          echo "LINUX_SHA=$linux_sha" >> $GITHUB_ENV
-          release_version="$(cat ./artifacts/release-version)"
-          echo "RELEASE_VERSION=$release_version" >> $GITHUB_ENV
-
-      - name: Validate release environment variables
-        run: |
-          echo "Release SHA macos: ${{ env.MACOS_SHA }}"
-          echo "Release SHA macos-arm: ${{ env.MACOS_SHA_ARM }}"
-          echo "Release SHA linux musl: ${{ env.LINUX_SHA }}"
-          echo "Release version: ${{ env.RELEASE_VERSION }}"
-
-      - name: Execute Homebrew packaging script
-        if: env.ACT != 'true'
-        run: |
-          # run packaging script
-          python "./deployment/homebrew/packager.py" ${{ env.RELEASE_VERSION }} "./deployment/homebrew/gman.rb.template" "./gman.rb" ${{ env.MACOS_SHA }} ${{ env.MACOS_SHA_ARM }} ${{ env.LINUX_SHA }}
-
-      - name: Push changes to Homebrew tap
-        if: env.ACT != 'true'
-        env:
-          TOKEN: ${{ secrets.GMAN_GITHUB_TOKEN }}
-        run: |
-          # push to Git
-          git config --global user.name "Dark-Alex-17"
-          git config --global user.email "alex.j.tusa@gmail.com"
-          git clone https://Dark-Alex-17:${{ secrets.GMAN_GITHUB_TOKEN }}@github.com/Dark-Alex-17/homebrew-gman.git
-          rm homebrew-gman/Formula/gman.rb
-          cp gman.rb homebrew-gman/Formula
-          cd homebrew-gman
-          git add .
-          git diff-index --quiet HEAD || git commit -am "Update formula for G-Man release ${{ env.RELEASE_VERSION }}"
-          git push https://$TOKEN@github.com/Dark-Alex-17/homebrew-gman.git
-
-  publish-crate:
-    needs: publish-github-release
-    name: Publish Crate
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check if actor is repository owner
-        if: ${{ github.actor != github.repository_owner  && env.ACT != 'true' }}
-        run: |
-          echo "You are not authorized to run this workflow."
-          exit 1
-
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Get bumped Cargo files (Act)
-        if: env.ACT == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: bumped-cargo-files
-          path: ${{ github.workspace }}
-
-      - name: Ensure repository is up-to-date
-        if: env.ACT != 'true'
-        run: |
-          git fetch --all
-          git pull
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-
-      - uses: katyo/publish-crates@v2
-        if: env.ACT != 'true'
-        with:
-          registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+#  publish-homebrew-formula:
+#    needs: [publish-github-release]
+#    name: Update Homebrew formulas
+#    runs-on: ubuntu-latest
+#    steps:
+#      - name: Check if actor is repository owner
+#        if: ${{ github.actor != github.repository_owner  && env.ACT != 'true' }}
+#        run: |
+#          echo "You are not authorized to run this workflow."
+#          exit 1
+#
+#      - name: Checkout repository
+#        uses: actions/checkout@v4
+#        with:
+#          fetch-depth: 1
+#
+#      - name: Get release artifacts
+#        uses: actions/download-artifact@v4
+#        with:
+#          path: artifacts
+#          merge-multiple: true
+#
+#      - name: Set release assets and version
+#        shell: bash
+#        run: |
+#          # Set environment variables
+#          macos_sha="$(cat ./artifacts/gman-x86_64-apple-darwin.sha256 | awk '{print $1}')"
+#          echo "MACOS_SHA=$macos_sha" >> $GITHUB_ENV
+#          macos_sha_arm="$(cat ./artifacts/gman-aarch64-apple-darwin.sha256 | awk '{print $1}')"
+#          echo "MACOS_SHA_ARM=$macos_sha_arm" >> $GITHUB_ENV
+#          linux_sha="$(cat ./artifacts/gman-x86_64-unknown-linux-musl.sha256 | awk '{print $1}')"
+#          echo "LINUX_SHA=$linux_sha" >> $GITHUB_ENV
+#          release_version="$(cat ./artifacts/release-version)"
+#          echo "RELEASE_VERSION=$release_version" >> $GITHUB_ENV
+#
+#      - name: Validate release environment variables
+#        run: |
+#          echo "Release SHA macos: ${{ env.MACOS_SHA }}"
+#          echo "Release SHA macos-arm: ${{ env.MACOS_SHA_ARM }}"
+#          echo "Release SHA linux musl: ${{ env.LINUX_SHA }}"
+#          echo "Release version: ${{ env.RELEASE_VERSION }}"
+#
+#      - name: Execute Homebrew packaging script
+#        if: env.ACT != 'true'
+#        run: |
+#          # run packaging script
+#          python "./deployment/homebrew/packager.py" ${{ env.RELEASE_VERSION }} "./deployment/homebrew/gman.rb.template" "./gman.rb" ${{ env.MACOS_SHA }} ${{ env.MACOS_SHA_ARM }} ${{ env.LINUX_SHA }}
+#
+#      - name: Push changes to Homebrew tap
+#        if: env.ACT != 'true'
+#        env:
+#          TOKEN: ${{ secrets.GMAN_GITHUB_TOKEN }}
+#        run: |
+#          # push to Git
+#          git config --global user.name "Dark-Alex-17"
+#          git config --global user.email "alex.j.tusa@gmail.com"
+#          git clone https://Dark-Alex-17:${{ secrets.GMAN_GITHUB_TOKEN }}@github.com/Dark-Alex-17/homebrew-gman.git
+#          rm homebrew-gman/Formula/gman.rb
+#          cp gman.rb homebrew-gman/Formula
+#          cd homebrew-gman
+#          git add .
+#          git diff-index --quiet HEAD || git commit -am "Update formula for G-Man release ${{ env.RELEASE_VERSION }}"
+#          git push https://$TOKEN@github.com/Dark-Alex-17/homebrew-gman.git
+#
+#  publish-crate:
+#    needs: publish-github-release
+#    name: Publish Crate
+#    runs-on: ubuntu-latest
+#    steps:
+#      - name: Check if actor is repository owner
+#        if: ${{ github.actor != github.repository_owner  && env.ACT != 'true' }}
+#        run: |
+#          echo "You are not authorized to run this workflow."
+#          exit 1
+#
+#      - name: Checkout
+#        uses: actions/checkout@v4
+#        with:
+#          fetch-depth: 0
+#
+#      - name: Get bumped Cargo files (Act)
+#        if: env.ACT == 'true'
+#        uses: actions/download-artifact@v4
+#        with:
+#          name: bumped-cargo-files
+#          path: ${{ github.workspace }}
+#
+#      - name: Ensure repository is up-to-date
+#        if: env.ACT != 'true'
+#        run: |
+#          git fetch --all
+#          git pull
+#
+#      - name: Install Rust stable
+#        uses: dtolnay/rust-toolchain@stable
+#
+#      - uses: katyo/publish-crates@v2
+#        if: env.ACT != 'true'
+#        with:
+#          registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
