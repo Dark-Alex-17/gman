@@ -133,24 +133,31 @@ To upgrade `gman` using Homebrew:
 brew upgrade gman
 ```
 
-### Winget (Windows)
-To install G-Man using Winget:
+### Scripts
+#### Linux/MacOS (`bash`)
+You can use the following command to run a bash script that downloads and installs the latest version of `gman` for your 
+OS (Linux/MacOS) and architecture (x86_64/arm64):
+
+```shell
+curl -fsSL https://raw.githubusercontent.com/Dark-Alex-17/gman/main/install.sh | bash
+```
+
+#### Windows/Linux/MacOS (`PowerShell`)
+You can use the following command to run a PowerShell script that downloads and installs the latest version of `gman` 
+for your OS (Windows/Linux/MacOS) and architecture (x86_64/arm64):
 
 ```powershell
-winget install gman
-
-# If you need to be more specific, use:
-winget install --id Dark-Alex-17.gman
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/Dark-Alex-17/gman/main/scripts/install_gman.ps1 | iex"
 ```
 
 ### Manual
 Binaries are available on the [releases](https://github.com/Dark-Alex-17/gman/releases) page for the following platforms:
 
-| Platform       | Architecture(s)            |
-|----------------|----------------------------|
-| macOS          | x86_64, arm64              |
-| Linux GNU/MUSL | x86_64,armv6,armv7,aarch64 |
-| Windows        | x86_64,aarch64             |
+| Platform       | Architecture(s) |
+|----------------|-----------------|
+| macOS          | x86_64, arm64   |
+| Linux GNU/MUSL | x86_64, aarch64 |
+| Windows        | x86_64, aarch64 |
 
 #### Windows Instructions
 To use a binary from the releases page on Windows, do the following:

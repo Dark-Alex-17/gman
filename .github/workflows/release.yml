@@ -356,50 +356,6 @@ jobs:
           path: artifacts
           overwrite: true
 
-  publish-winget-package:
-    needs: [publish-github-release]
-    name: Publish winget package
-    runs-on: windows-latest
-    steps:
-      - name: Check if actor is repository owner
-        if: ${{ github.actor != github.repository_owner  && env.ACT != 'true' }}
-        shell: bash
-        run: |
-          echo "You are not authorized to run this workflow."
-          exit 1
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Get release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Set release version
-        shell: bash
-        run: |
-          release_version="$(cat ./artifacts/release-version)"
-          echo "RELEASE_VERSION=$release_version" >> $GITHUB_ENV
-
-      - name: Validate release environment variables
-        shell: bash
-        run: |
-          echo "Release version: ${{ env.RELEASE_VERSION }}"
-
-      - name: Publish to winget (opens PR to microsoft/winget-pkgs)
-        if: env.ACT != 'true'
-        uses: vedantmgoyal9/winget-releaser@v2
-        with:
-          identifier: DarkAlex17.GMan
-          version: ${{ env.RELEASE_VERSION }}
-          release-tag: v${{ env.RELEASE_VERSION }}
-          installers-regex: '\.zip$'
-          token: ${{ secrets.WINGET_GITHUB_TOKEN }}
-
   publish-homebrew-formula:
     needs: [publish-github-release]
     name: Update Homebrew formulas
