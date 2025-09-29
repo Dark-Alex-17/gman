@@ -94,7 +94,8 @@ gman aws sts get-caller-identity
   - [AWS Secrets Manager](#provider-aws_secrets_manager)
   - [GCP Secret Manager](#provider-gcp_secret_manager)
   - [Azure Key Vault](#provider-azure_key_vault)
-- [Run Configurations](#run-configurations)
+- [Run Configurations](#run-configurations) 
+  - [Specifying a Default Provider per Run Config](#specifying-a-default-provider-per-run-config)
   - [Environment Variable Secret Injection](#environment-variable-secret-injection)
   - [Inject Secrets via Command-Line Flags](#inject-secrets-via-command-line-flags)
   - [Inject Secrets into Files](#inject-secrets-into-files)
@@ -403,6 +404,45 @@ will error out and report that it could not find the run config with that name.
 
 You can manually specify which run configuration to use with the `--profile` flag. Again, if no profile is found with 
 that name, `gman` will error out.
+
+
+### Specifying a Default Provider per Run Config
+All run configs also support the `provider` field, which lets you override the default provider for that specific
+profile. This is useful if you have multiple providers configured and want to use a different one for a specific command
+, but that provider may not be the `default_provider`, and you don't want to have to specify `--provider` on the command
+line every time.
+
+For Example:
+```yaml
+default_provider: local
+run_configs:
+  # `gman aws ...` uses the `aws` provider instead of `local` if no
+  # `--provider` is given.
+  - name: aws
+    # Can be overridden by explicitly specifying a `--provider`
+    provider: aws
+    secrets:
+      - DB_USERNAME
+      - DB_PASSWORD
+  # `gman docker ...` uses the default_provider `local` because no 
+  # `provider` is specified.
+  - name: docker
+    secrets:
+      - MY_APP_API_KEY
+      - MY_APP_DB_PASSWORD
+  # `gman managarr ...` uses the `local` provider; This is useful 
+  # if you change the default provider to something else.
+  - name: managarr
+    provider: local
+    secrets:
+      - RADARR_API_KEY
+      - SONARR_API_KEY
+    files:
+      - /home/user/.config/managarr/config.yml
+```
+
+**Important Note:** Any run config with a `provider` field can be overridden by specifying `--provider` on the command 
+line.
 
 ### Environment Variable Secret Injection
 

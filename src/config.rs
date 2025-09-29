@@ -45,6 +45,7 @@ use validator::{Validate, ValidationError};
 pub struct RunConfig {
     #[validate(required)]
     pub name: Option<String>,
+		pub provider: Option<String>,
     #[validate(required)]
     pub secrets: Option<Vec<String>>,
     pub files: Option<Vec<PathBuf>>,

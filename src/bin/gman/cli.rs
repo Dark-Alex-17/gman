@@ -2,7 +2,6 @@ use crate::command::preview_command;
 use anyhow::{Context, Result, anyhow};
 use futures::future::join_all;
 use gman::config::{Config, RunConfig};
-use gman::providers::SecretProvider;
 use log::{debug, error};
 use regex::Regex;
 use std::collections::HashMap;
@@ -15,7 +14,7 @@ const ARG_FORMAT_PLACEHOLDER_KEY: &str = "{{key}}";
 const ARG_FORMAT_PLACEHOLDER_VALUE: &str = "{{value}}";
 
 pub async fn wrap_and_run_command(
-    secrets_provider: &mut dyn SecretProvider,
+		provider: Option<String>,
     config: &Config,
     tokens: Vec<OsString>,
     profile_name: Option<String>,
@@ -36,6 +35,8 @@ pub async fn wrap_and_run_command(
             .find(|c| c.name.as_deref() == Some(run_config_profile_name))
     });
     if let Some(run_cfg) = run_config_opt {
+			let mut provider_config = config.extract_provider_config(provider.or(run_cfg.provider.clone()))?;
+			let secrets_provider = provider_config.extract_provider();
         let secrets_result_futures = run_cfg
             .secrets
             .as_ref()
@@ -163,7 +164,7 @@ fn generate_files_secret_injections(
     secrets: HashMap<&str, String>,
     run_config: &RunConfig,
 ) -> Result<Vec<(PathBuf, String, String)>> {
-    let re = Regex::new(r"\{\{(.+)\}\}")?;
+    let re = Regex::new(r"\{\{(.+)}}")?;
     let mut results = Vec::new();
     for file in run_config
         .files
@@ -260,26 +261,6 @@ mod tests {
     use std::collections::HashMap;
     use std::ffi::OsString;
 
-    struct DummyProvider;
-    #[async_trait::async_trait]
-    impl SecretProvider for DummyProvider {
-        fn name(&self) -> &'static str {
-            "Dummy"
-        }
-        async fn get_secret(&self, key: &str) -> Result<String> {
-            Ok(format!("{}_VAL", key))
-        }
-        async fn set_secret(&self, _key: &str, _value: &str) -> Result<()> {
-            Ok(())
-        }
-        async fn delete_secret(&self, _key: &str) -> Result<()> {
-            Ok(())
-        }
-        async fn sync(&mut self) -> Result<()> {
-            Ok(())
-        }
-    }
-
     #[test]
     fn test_generate_files_secret_injections() {
         let mut secrets = HashMap::new();
@@ -290,6 +271,7 @@ mod tests {
 
         let run_config = RunConfig {
             name: Some("test".to_string()),
+						provider: None,
             secrets: Some(vec!["testing/SOME-secret".to_string()]),
             files: Some(vec![file_path.clone()]),
             flag: None,
@@ -309,6 +291,7 @@ mod tests {
     fn test_parse_args_insert_and_append() {
         let run_config = RunConfig {
             name: Some("docker".into()),
+					provider: None,
             secrets: Some(vec!["api_key".into()]),
             files: None,
             flag: Some("-e".into()),
@@ -347,10 +330,8 @@ mod tests {
     #[tokio::test]
     async fn test_wrap_and_run_command_no_profile() {
         let cfg = Config::default();
-        let mut dummy = DummyProvider;
-        let prov: &mut dyn SecretProvider = &mut dummy;
         let tokens = vec![OsString::from("echo"), OsString::from("hi")];
-        let err = wrap_and_run_command(prov, &cfg, tokens, None, true)
+        let err = wrap_and_run_command(None, &cfg, tokens, None, true)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("No run profile found"));
@@ -361,6 +342,7 @@ mod tests {
         // Create a config with a matching run profile for command "echo"
         let run_cfg = RunConfig {
             name: Some("echo".into()),
+					provider: None,
             secrets: Some(vec!["api_key".into()]),
             files: None,
             flag: None,
@@ -371,13 +353,11 @@ mod tests {
             run_configs: Some(vec![run_cfg]),
             ..Config::default()
         };
-        let mut dummy = DummyProvider;
-        let prov: &mut dyn SecretProvider = &mut dummy;
 
         // Capture stderr for dry_run preview
         let tokens = vec![OsString::from("echo"), OsString::from("hello")];
         // Best-effort: ensure function does not error under dry_run
-        let res = wrap_and_run_command(prov, &cfg, tokens, None, true).await;
+        let res = wrap_and_run_command(None, &cfg, tokens, None, true).await;
         assert!(res.is_ok());
         // Not asserting output text to keep test platform-agnostic
     }

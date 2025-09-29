@@ -253,8 +253,7 @@ async fn main() -> Result<()> {
             })?;
         }
         Commands::External(tokens) => {
-            wrap_and_run_command(secrets_provider, &config, tokens, cli.profile, cli.dry_run)
-                .await?;
+            wrap_and_run_command(cli.provider, &config, tokens, cli.profile, cli.dry_run).await?;
         }
         Commands::Completions { shell } => {
             let mut cmd = Cli::command();
