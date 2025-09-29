@@ -175,6 +175,22 @@ To use a binary from the releases page on Linux/MacOS, do the following:
 3. Extract the binary with `tar -C /usr/local/bin -xzf gman-<arch>.tar.gz` (Note: This may require `sudo`)
 4. Now you can run `gman`!
 
+### Enable Tab Completion
+`gman` supports shell tab completion for `bash`, `zsh`, and `fish`. To enable it, run the following command for your 
+shell:
+
+```shell
+# Bash
+echo 'source <(COMPLETE=bash gman)' >> ~/.bashrc
+# Zsh
+echo 'source <(COMPLETE=zsh gman)' >> ~/.zshrc
+# Fish
+echo 'COMPLETE=fish gman | source' >> ~/.config/fish/config.fish
+```
+
+Then restart your shell or `source` the appropriate config file.
+
+
 ## Configuration
 
 `gman` reads a YAML configuration file located at an OS-specific path:

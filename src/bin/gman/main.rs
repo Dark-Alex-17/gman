@@ -1,11 +1,14 @@
+use crate::cli::run_config_completer;
+use crate::cli::secrets_completer;
 use anyhow::{Context, Result};
 use clap::Subcommand;
 use clap::{
-    CommandFactory, Parser, ValueEnum, crate_authors, crate_description, crate_name, crate_version,
+	crate_authors, crate_description, crate_name, crate_version, CommandFactory, Parser, ValueEnum,
 };
+use clap_complete::{ArgValueCompleter, CompleteEnv};
 use crossterm::execute;
-use crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
-use gman::config::{Config, get_config_file_path, load_config};
+use crossterm::terminal::{disable_raw_mode, LeaveAlternateScreen};
+use gman::config::{get_config_file_path, load_config, Config};
 use std::ffi::OsString;
 use std::io::{self, IsTerminal, Read, Write};
 use std::panic::PanicHookInfo;
@@ -48,11 +51,11 @@ struct Cli {
     output: Option<OutputFormat>,
 
     /// Specify the secret provider to use (defaults to 'default_provider' in config (usually 'local'))
-    #[arg(long, value_enum, global = true, env = "GMAN_PROVIDER")]
+    #[arg(long, global = true, env = "GMAN_PROVIDER", value_parser = ["local", "aws_secrets_manager", "azure_key_vault", "gcp_secret_manager", "gopass"])]
     provider: Option<String>,
 
     /// Specify a run profile to use when wrapping a command
-    #[arg(long, short)]
+    #[arg(long, short, add = ArgValueCompleter::new(run_config_completer))]
     profile: Option<String>,
 
     /// Output the command that will be run instead of executing it
@@ -82,6 +85,7 @@ enum Commands {
     /// Decrypt a secret and print the plaintext
     Get {
         /// Name of the secret to retrieve
+				#[arg(add = ArgValueCompleter::new(secrets_completer))]
         name: String,
     },
 
@@ -89,12 +93,14 @@ enum Commands {
     /// If a provider does not support updating secrets, this command will return an error.
     Update {
         /// Name of the secret to update
+				#[arg(add = ArgValueCompleter::new(secrets_completer))]
         name: String,
     },
 
     /// Delete a secret from the configured secret provider
     Delete {
         /// Name of the secret to delete
+				#[arg(add = ArgValueCompleter::new(secrets_completer))]
         name: String,
     },
 
@@ -129,6 +135,7 @@ async fn main() -> Result<()> {
     panic::set_hook(Box::new(|info| {
         panic_hook(info);
     }));
+    CompleteEnv::with_factory(Cli::command).complete();
     let cli = Cli::parse();
 
     if cli.show_log_path {
