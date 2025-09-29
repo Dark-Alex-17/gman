@@ -77,12 +77,14 @@ struct Cli {
 #[derive(Subcommand, Clone, Debug)]
 enum Commands {
     /// Add a secret to the configured secret provider
+    #[clap(aliases = &["set", "create"])]
     Add {
         /// Name of the secret to store
         name: String,
     },
 
     /// Decrypt a secret and print the plaintext
+    #[clap(alias = "show")]
     Get {
         /// Name of the secret to retrieve
 				#[arg(add = ArgValueCompleter::new(secrets_completer))]
@@ -98,6 +100,7 @@ enum Commands {
     },
 
     /// Delete a secret from the configured secret provider
+    #[clap(aliases = &["remove", "rm"])]
     Delete {
         /// Name of the secret to delete
 				#[arg(add = ArgValueCompleter::new(secrets_completer))]
@@ -106,6 +109,7 @@ enum Commands {
 
     /// List all secrets stored in the configured secret provider (if supported by the provider)
     /// If a provider does not support listing secrets, this command will return an error.
+    #[clap(alias = "ls")]
     List {},
 
     /// Sync secrets with remote storage (if supported by the provider)
