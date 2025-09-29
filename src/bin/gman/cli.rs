@@ -16,7 +16,7 @@ const ARG_FORMAT_PLACEHOLDER_KEY: &str = "{{key}}";
 const ARG_FORMAT_PLACEHOLDER_VALUE: &str = "{{value}}";
 
 pub async fn wrap_and_run_command(
-		provider: Option<String>,
+    provider: Option<String>,
     config: &Config,
     tokens: Vec<OsString>,
     profile_name: Option<String>,
@@ -37,8 +37,9 @@ pub async fn wrap_and_run_command(
             .find(|c| c.name.as_deref() == Some(run_config_profile_name))
     });
     if let Some(run_cfg) = run_config_opt {
-			let mut provider_config = config.extract_provider_config(provider.or(run_cfg.provider.clone()))?;
-			let secrets_provider = provider_config.extract_provider();
+        let mut provider_config =
+            config.extract_provider_config(provider.or(run_cfg.provider.clone()))?;
+        let secrets_provider = provider_config.extract_provider();
         let secrets_result_futures = run_cfg
             .secrets
             .as_ref()
@@ -318,7 +319,7 @@ mod tests {
 
         let run_config = RunConfig {
             name: Some("test".to_string()),
-						provider: None,
+            provider: None,
             secrets: Some(vec!["testing/SOME-secret".to_string()]),
             files: Some(vec![file_path.clone()]),
             flag: None,
@@ -338,7 +339,7 @@ mod tests {
     fn test_parse_args_insert_and_append() {
         let run_config = RunConfig {
             name: Some("docker".into()),
-					provider: None,
+            provider: None,
             secrets: Some(vec!["api_key".into()]),
             files: None,
             flag: Some("-e".into()),
@@ -389,7 +390,7 @@ mod tests {
         // Create a config with a matching run profile for command "echo"
         let run_cfg = RunConfig {
             name: Some("echo".into()),
-					provider: None,
+            provider: None,
             secrets: Some(vec!["api_key".into()]),
             files: None,
             flag: None,

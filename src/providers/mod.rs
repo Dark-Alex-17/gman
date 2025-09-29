@@ -6,16 +6,23 @@ pub mod aws_secrets_manager;
 pub mod azure_key_vault;
 pub mod gcp_secret_manager;
 mod git_sync;
+mod gopass;
 pub mod local;
 
+use crate::providers::gopass::GopassProvider;
 use crate::providers::local::LocalProvider;
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use aws_secrets_manager::AwsSecretsManagerProvider;
+use azure_key_vault::AzureKeyVaultProvider;
 use gcp_secret_manager::GcpSecretManagerProvider;
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::fmt::{Display, Formatter};
+use std::{env, fmt};
 use validator::{Validate, ValidationErrors};
+
+pub(in crate::providers) static ENV_PATH: Lazy<Result<String>> =
+    Lazy::new(|| env::var("PATH").context("No PATH environment variable"));
 
 /// A secret storage backend capable of CRUD, with optional
 /// update, listing, and sync support.
@@ -63,7 +70,11 @@ pub enum SupportedProvider {
     },
     AzureKeyVault {
         #[serde(flatten)]
-        provider_def: azure_key_vault::AzureKeyVaultProvider,
+        provider_def: AzureKeyVaultProvider,
+    },
+    Gopass {
+        #[serde(flatten)]
+        provider_def: GopassProvider,
     },
 }
 
@@ -74,6 +85,7 @@ impl Validate for SupportedProvider {
             SupportedProvider::AwsSecretsManager { provider_def } => provider_def.validate(),
             SupportedProvider::GcpSecretManager { provider_def } => provider_def.validate(),
             SupportedProvider::AzureKeyVault { provider_def } => provider_def.validate(),
+            SupportedProvider::Gopass { provider_def } => provider_def.validate(),
         }
     }
 }
@@ -93,6 +105,7 @@ impl Display for SupportedProvider {
             SupportedProvider::AwsSecretsManager { .. } => write!(f, "aws_secrets_manager"),
             SupportedProvider::GcpSecretManager { .. } => write!(f, "gcp_secret_manager"),
             SupportedProvider::AzureKeyVault { .. } => write!(f, "azure_key_vault"),
+            SupportedProvider::Gopass { .. } => write!(f, "gopass"),
         }
     }
 }

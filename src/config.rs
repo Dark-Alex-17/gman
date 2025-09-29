@@ -45,7 +45,7 @@ use validator::{Validate, ValidationError};
 pub struct RunConfig {
     #[validate(required)]
     pub name: Option<String>,
-		pub provider: Option<String>,
+    pub provider: Option<String>,
     #[validate(required)]
     pub secrets: Option<Vec<String>>,
     pub files: Option<Vec<PathBuf>>,
@@ -160,6 +160,10 @@ impl ProviderConfig {
             }
             SupportedProvider::AzureKeyVault { provider_def } => {
                 debug!("Using Azure Key Vault provider");
+                provider_def
+            }
+            SupportedProvider::Gopass { provider_def } => {
+                debug!("Using Gopass provider");
                 provider_def
             }
         }

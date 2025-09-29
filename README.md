@@ -262,6 +262,7 @@ documented and added without breaking existing setups. The following table shows
 | [`hashicorp_vault`](https://www.hashicorp.com/en/products/vault)                                                         | 🕒     |                                                      |                                            |
 | [`azure_key_vault`](https://azure.microsoft.com/en-us/products/key-vault/)                                               | ✅      | [Azure Key Vault](#provider-azure_key_vault)         |                                            |
 | [`gcp_secret_manager`](https://cloud.google.com/security/products/secret-manager?hl=en)                                  | ✅      | [GCP Secret Manager](#provider-gcp_secret_manager)   |                                            |
+| [`gopass`](https://www.gopass.pw/)                                                                                      | ✅     |                                                      |                                            |
 | [`1password`](https://1password.com/)                                                                                    | 🕒     |                                                      |                                            |
 | [`bitwarden`](https://bitwarden.com/)                                                                                    | 🕒     |                                                      |                                            |
 | [`dashlane`](https://www.dashlane.com/)                                                                                  | 🕒     |                                                      | Waiting for CLI support for adding secrets |
@@ -405,6 +406,26 @@ Important notes:
 - Ensure your identity has the necessary Key Vault permissions (RBAC such as `Key Vault Secrets User`/`Administrator`, 
   or appropriate access policies) for get/set/list/delete.
 
+### Provider: `gopass`
+The `gopass` provider uses [gopass](https://www.gopass.pw/) as the backing storage location for secrets.
+
+- Optional: `store` (string) to specify a particular gopass store if you have multiple.
+
+Configuration example:
+
+```yaml
+default_provider: gopass
+providers:
+  - name: gopass
+    type: gopass
+    store: my-store  # Optional; if omitted, uses the default configured gopass store
+```
+
+Important notes:
+- Ensure `gopass` is installed and initialized on your system.
+- Secrets are managed using gopass's native commands; `gman` acts as a wrapper to interface with gopass.
+- Updates overwrite existing secrets
+- If no store is specified, the default gopass store is used and `gman sync` will sync with all configured stores.
 ## Run Configurations
 
 Run configurations (or "profiles") tell `gman` how to inject secrets into a command. Three modes of secret injection are
