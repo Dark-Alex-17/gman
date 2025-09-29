@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.1] - 2025-09-10
 
+## v0.2.0 (2025-09-29)
+
+### Feat
+
+- gopass support
+- Added command aliases to make the CLI more universal
+- Added dynamic tab completions for the profile, providers, and the secrets in any given secret manager
+- Users can now specify a default provider to use with each run config, so they don't need to explicitly specify which to use when wanting to run different applications.
+
 ## v0.1.0 (2025-09-17)
 
 ### Feat
