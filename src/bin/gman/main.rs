@@ -3,12 +3,12 @@ use crate::cli::secrets_completer;
 use anyhow::{Context, Result};
 use clap::Subcommand;
 use clap::{
-	crate_authors, crate_description, crate_name, crate_version, CommandFactory, Parser, ValueEnum,
+    CommandFactory, Parser, ValueEnum, crate_authors, crate_description, crate_name, crate_version,
 };
 use clap_complete::{ArgValueCompleter, CompleteEnv};
 use crossterm::execute;
-use crossterm::terminal::{disable_raw_mode, LeaveAlternateScreen};
-use gman::config::{get_config_file_path, load_config, Config};
+use crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
+use gman::config::{Config, get_config_file_path, load_config};
 use std::ffi::OsString;
 use std::io::{self, IsTerminal, Read, Write};
 use std::panic::PanicHookInfo;
@@ -87,7 +87,7 @@ enum Commands {
     #[clap(alias = "show")]
     Get {
         /// Name of the secret to retrieve
-				#[arg(add = ArgValueCompleter::new(secrets_completer))]
+        #[arg(add = ArgValueCompleter::new(secrets_completer))]
         name: String,
     },
 
@@ -95,7 +95,7 @@ enum Commands {
     /// If a provider does not support updating secrets, this command will return an error.
     Update {
         /// Name of the secret to update
-				#[arg(add = ArgValueCompleter::new(secrets_completer))]
+        #[arg(add = ArgValueCompleter::new(secrets_completer))]
         name: String,
     },
 
@@ -103,7 +103,7 @@ enum Commands {
     #[clap(aliases = &["remove", "rm"])]
     Delete {
         /// Name of the secret to delete
-				#[arg(add = ArgValueCompleter::new(secrets_completer))]
+        #[arg(add = ArgValueCompleter::new(secrets_completer))]
         name: String,
     },
 

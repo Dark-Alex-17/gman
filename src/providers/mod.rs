@@ -6,7 +6,7 @@ pub mod aws_secrets_manager;
 pub mod azure_key_vault;
 pub mod gcp_secret_manager;
 mod git_sync;
-mod gopass;
+pub mod gopass;
 pub mod local;
 
 use crate::providers::gopass::GopassProvider;

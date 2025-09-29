@@ -11,6 +11,7 @@
 //!
 //! let rc = RunConfig{
 //!     name: Some("echo".into()),
+//!     provider: None,
 //!     secrets: Some(vec!["api_key".into()]),
 //!     files: None,
 //!     flag: None,

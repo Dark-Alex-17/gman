@@ -18,14 +18,14 @@ use validator::Validate;
 ///
 /// Example
 /// ```no_run
-/// use gman::providers::local::GopassProvider;
+/// use gman::providers::gopass::GopassProvider;
 /// use gman::providers::{SecretProvider, SupportedProvider};
 /// use gman::config::Config;
 ///
 /// let provider = GopassProvider::default();
 /// let _ = provider.set_secret("MY_SECRET", "value");
 /// ```
-#[derive(Debug, Clone, Validate, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Validate, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct GopassProvider {
     pub store: Option<String>,

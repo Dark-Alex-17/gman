@@ -9,7 +9,7 @@ mod tests {
     fn test_run_config_valid() {
         let run_config = RunConfig {
             name: Some("test".to_string()),
-						provider: None,
+            provider: None,
             secrets: Some(vec!["secret1".to_string()]),
             flag: None,
             flag_position: None,
@@ -24,7 +24,7 @@ mod tests {
     fn test_run_config_missing_name() {
         let run_config = RunConfig {
             name: None,
-						provider: None,
+            provider: None,
             secrets: Some(vec!["secret1".to_string()]),
             flag: None,
             flag_position: None,
@@ -39,7 +39,7 @@ mod tests {
     fn test_run_config_missing_secrets() {
         let run_config = RunConfig {
             name: Some("test".to_string()),
-						provider: None,
+            provider: None,
             secrets: None,
             flag: None,
             flag_position: None,
@@ -54,7 +54,7 @@ mod tests {
     fn test_run_config_invalid_flag_position() {
         let run_config = RunConfig {
             name: Some("test".to_string()),
-						provider: None,
+            provider: None,
             secrets: Some(vec!["secret1".to_string()]),
             flag: Some("--test-flag".to_string()),
             flag_position: Some(0),
@@ -69,7 +69,7 @@ mod tests {
     fn test_run_config_flags_or_none_all_some() {
         let run_config = RunConfig {
             name: Some("test".to_string()),
-						provider: None,
+            provider: None,
             secrets: Some(vec!["secret1".to_string()]),
             flag: Some("--test-flag".to_string()),
             flag_position: Some(1),
@@ -84,7 +84,7 @@ mod tests {
     fn test_run_config_flags_or_none_all_none() {
         let run_config = RunConfig {
             name: Some("test".to_string()),
-						provider: None,
+            provider: None,
             secrets: Some(vec!["secret1".to_string()]),
             flag: None,
             flag_position: None,
@@ -99,7 +99,7 @@ mod tests {
     fn test_run_config_flags_or_none_partial_some() {
         let run_config = RunConfig {
             name: Some("test".to_string()),
-						provider: None,
+            provider: None,
             secrets: Some(vec!["secret1".to_string()]),
             flag: Some("--test-flag".to_string()),
             flag_position: None,
@@ -114,7 +114,7 @@ mod tests {
     fn test_run_config_flags_or_none_missing_placeholder() {
         let run_config = RunConfig {
             name: Some("test".to_string()),
-						provider: None,
+            provider: None,
             secrets: Some(vec!["secret1".to_string()]),
             flag: Some("--test-flag".to_string()),
             flag_position: Some(1),
@@ -129,7 +129,7 @@ mod tests {
     fn test_run_config_flags_or_files_all_none() {
         let run_config = RunConfig {
             name: Some("test".to_string()),
-						provider: None,
+            provider: None,
             secrets: Some(vec!["secret1".to_string()]),
             flag: None,
             flag_position: None,
@@ -144,7 +144,7 @@ mod tests {
     fn test_run_config_flags_or_files_files_is_some() {
         let run_config = RunConfig {
             name: Some("test".to_string()),
-						provider: None,
+            provider: None,
             secrets: Some(vec!["secret1".to_string()]),
             flag: None,
             flag_position: None,
@@ -159,7 +159,7 @@ mod tests {
     fn test_run_config_flags_or_files_all_some() {
         let run_config = RunConfig {
             name: Some("test".to_string()),
-						provider: None,
+            provider: None,
             secrets: Some(vec!["secret1".to_string()]),
             flag: Some("--test-flag".to_string()),
             flag_position: Some(1),

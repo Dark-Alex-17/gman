@@ -1,7 +1,8 @@
 use crate::command::preview_command;
 use anyhow::{Context, Result, anyhow};
+use clap_complete::CompletionCandidate;
 use futures::future::join_all;
-use gman::config::{load_config, Config, RunConfig};
+use gman::config::{Config, RunConfig, load_config};
 use log::{debug, error};
 use regex::Regex;
 use std::collections::HashMap;
@@ -9,7 +10,6 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
-use clap_complete::CompletionCandidate;
 use tokio::runtime::Handle;
 
 const ARG_FORMAT_PLACEHOLDER_KEY: &str = "{{key}}";
@@ -256,48 +256,49 @@ pub fn parse_args(
 }
 
 pub fn run_config_completer(current: &OsStr) -> Vec<CompletionCandidate> {
-	let cur = current.to_string_lossy();
-	match load_config() {
-		Ok(config) => {
-			if let Some(run_configs) = config.run_configs {
-				run_configs
-					.iter()
-					.filter(|rc| {
-						rc.name
-							.as_ref()
-							.expect("run config has no name")
-							.starts_with(&*cur)
-					})
-					.map(|rc| {
-						CompletionCandidate::new(rc.name.as_ref().expect("run config has no name"))
-					})
-					.collect()
-			} else {
-				vec![]
-			}
-		}
-		Err(_) => vec![],
-	}
+    let cur = current.to_string_lossy();
+    match load_config() {
+        Ok(config) => {
+            if let Some(run_configs) = config.run_configs {
+                run_configs
+                    .iter()
+                    .filter(|rc| {
+                        rc.name
+                            .as_ref()
+                            .expect("run config has no name")
+                            .starts_with(&*cur)
+                    })
+                    .map(|rc| {
+                        CompletionCandidate::new(rc.name.as_ref().expect("run config has no name"))
+                    })
+                    .collect()
+            } else {
+                vec![]
+            }
+        }
+        Err(_) => vec![],
+    }
 }
 
 pub fn secrets_completer(current: &OsStr) -> Vec<CompletionCandidate> {
-	let cur = current.to_string_lossy();
-	match load_config() {
-		Ok(config) => {
-			let mut provider_config = match config.extract_provider_config(None) {
-				Ok(pc) => pc,
-				Err(_) => return vec![],
-			};
-			let secrets_provider = provider_config.extract_provider();
-			let h = Handle::current();
-			tokio::task::block_in_place(|| h.block_on(secrets_provider.list_secrets())).unwrap_or_default()
-				.into_iter()
-				.filter(|s| s.starts_with(&*cur))
-				.map(CompletionCandidate::new)
-				.collect()
-		}
-		Err(_) => vec![],
-	}
+    let cur = current.to_string_lossy();
+    match load_config() {
+        Ok(config) => {
+            let mut provider_config = match config.extract_provider_config(None) {
+                Ok(pc) => pc,
+                Err(_) => return vec![],
+            };
+            let secrets_provider = provider_config.extract_provider();
+            let h = Handle::current();
+            tokio::task::block_in_place(|| h.block_on(secrets_provider.list_secrets()))
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|s| s.starts_with(&*cur))
+                .map(CompletionCandidate::new)
+                .collect()
+        }
+        Err(_) => vec![],
+    }
 }
 
 #[cfg(test)]
@@ -402,11 +403,10 @@ mod tests {
             ..Config::default()
         };
 
-        // Capture stderr for dry_run preview
         let tokens = vec![OsString::from("echo"), OsString::from("hello")];
-        // Best-effort: ensure function does not error under dry_run
-        let res = wrap_and_run_command(None, &cfg, tokens, None, true).await;
-        assert!(res.is_ok());
-        // Not asserting output text to keep test platform-agnostic
+        let err = wrap_and_run_command(None, &cfg, tokens, None, true)
+            .await
+            .expect_err("expected failed secret resolution in dry_run");
+        assert!(err.to_string().contains("Failed to fetch"));
     }
 }
