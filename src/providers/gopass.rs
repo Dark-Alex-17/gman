@@ -1,4 +1,3 @@
-use crate::config::deserialize_optional_env_var;
 use crate::providers::{ENV_PATH, SecretProvider};
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -29,7 +28,6 @@ use validator::Validate;
 #[derive(Debug, Default, Clone, Validate, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct GopassProvider {
-    #[serde(default, deserialize_with = "deserialize_optional_env_var")]
     pub store: Option<String>,
 }
 

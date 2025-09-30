@@ -131,18 +131,6 @@ fn cli_shows_help() {
 }
 
 #[test]
-fn cli_completions_bash() {
-    let (_td, cfg, cache) = setup_env();
-    let mut cmd = Command::cargo_bin("gman").unwrap();
-    cmd.env("XDG_CACHE_HOME", &cache)
-        .env("XDG_CONFIG_HOME", &cfg)
-        .args(["completions", "bash"]);
-    cmd.assert()
-        .success()
-        .stdout(predicate::str::contains("_gman").or(predicate::str::contains("complete -F")));
-}
-
-#[test]
 fn cli_add_get_list_update_delete_roundtrip() {
     let (td, xdg_cfg, xdg_cache) = setup_env();
     let pw_file = td.path().join("pw.txt");

@@ -1,4 +1,3 @@
-use crate::config::deserialize_optional_env_var;
 use crate::providers::SecretProvider;
 use anyhow::{Context, Result, anyhow};
 use gcloud_sdk::google::cloud::secretmanager::v1;
@@ -40,7 +39,6 @@ type SecretsManagerClient = GoogleApi<SecretManagerServiceClient<GoogleAuthMiddl
 #[serde(deny_unknown_fields)]
 pub struct GcpSecretManagerProvider {
     #[validate(required)]
-    #[serde(default, deserialize_with = "deserialize_optional_env_var")]
     pub gcp_project_id: Option<String>,
 }
 

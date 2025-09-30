@@ -4,12 +4,12 @@ use crate::cli::secrets_completer;
 use anyhow::{Context, Result};
 use clap::Subcommand;
 use clap::{
-    CommandFactory, Parser, ValueEnum, crate_authors, crate_description, crate_name, crate_version,
+    crate_authors, crate_description, crate_name, crate_version, CommandFactory, Parser, ValueEnum,
 };
 use clap_complete::{ArgValueCompleter, CompleteEnv};
 use crossterm::execute;
-use crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
-use gman::config::{Config, get_config_file_path, load_config};
+use crossterm::terminal::{disable_raw_mode, LeaveAlternateScreen};
+use gman::config::{get_config_file_path, load_config, Config};
 use std::ffi::OsString;
 use std::io::{self, IsTerminal, Read, Write};
 use std::panic::PanicHookInfo;
@@ -123,13 +123,6 @@ enum Commands {
     /// configured in a corresponding run profile
     #[command(external_subcommand)]
     External(Vec<OsString>),
-
-    /// Generate shell completion scripts
-    Completions {
-        /// The shell to generate the script for
-        #[arg(value_enum)]
-        shell: clap_complete::Shell,
-    },
 }
 
 #[tokio::main]
@@ -157,7 +150,7 @@ async fn main() -> Result<()> {
         exit(1);
     }
 
-    let config = load_config()?;
+    let config = load_config(true)?;
     let mut provider_config = config.extract_provider_config(cli.provider.clone())?;
     let secrets_provider = provider_config.extract_provider();
 
@@ -238,7 +231,8 @@ async fn main() -> Result<()> {
             }
         }
         Commands::Config {} => {
-            let config_yaml = serde_yaml::to_string(&config)
+            let uninterpolated_config = load_config(false)?;
+            let config_yaml = serde_yaml::to_string(&uninterpolated_config)
                 .with_context(|| "failed to serialize existing configuration")?;
             let new_config = Editor::new()
                 .edit(&config_yaml)
@@ -266,11 +260,6 @@ async fn main() -> Result<()> {
         }
         Commands::External(tokens) => {
             wrap_and_run_command(cli.provider, &config, tokens, cli.profile, cli.dry_run).await?;
-        }
-        Commands::Completions { shell } => {
-            let mut cmd = Cli::command();
-            let bin_name = cmd.get_name().to_string();
-            clap_complete::generate(shell, &mut cmd, bin_name, &mut io::stdout());
         }
     }
 

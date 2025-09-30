@@ -1,16 +1,14 @@
-use crate::config::deserialize_optional_env_var;
-use crate::config::deserialize_optional_pathbuf_env_var;
-use anyhow::{Context, anyhow, bail};
+use anyhow::{anyhow, bail, Context};
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::{env, fs};
 use zeroize::Zeroize;
 
-use crate::config::{Config, get_config_file_path, load_config};
+use crate::config::{get_config_file_path, load_config, Config};
 use crate::providers::git_sync::{
-    SyncOpts, default_git_email, default_git_username, ensure_git_available, repo_name_from_url,
-    resolve_git, sync_and_push,
+    default_git_email, default_git_username, ensure_git_available, repo_name_from_url, resolve_git,
+    sync_and_push, SyncOpts,
 };
 use crate::providers::{SecretProvider, SupportedProvider};
 use crate::{
@@ -18,13 +16,13 @@ use crate::{
 };
 use anyhow::Result;
 use argon2::{Algorithm, Argon2, Params, Version};
-use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
+use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use chacha20poly1305::aead::rand_core::RngCore;
 use chacha20poly1305::{
-    Key, XChaCha20Poly1305, XNonce,
     aead::{Aead, KeyInit, OsRng},
+    Key, XChaCha20Poly1305, XNonce,
 };
-use dialoguer::{Input, theme};
+use dialoguer::{theme, Input};
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
@@ -52,21 +50,14 @@ use validator::Validate;
 #[derive(Debug, Clone, Validate, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct LocalProvider {
-    #[serde(default, deserialize_with = "deserialize_optional_pathbuf_env_var")]
     pub password_file: Option<PathBuf>,
-    #[serde(default, deserialize_with = "deserialize_optional_env_var")]
     pub git_branch: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_env_var")]
     pub git_remote_url: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_env_var")]
     pub git_user_name: Option<String>,
     #[validate(email)]
-    #[serde(default, deserialize_with = "deserialize_optional_env_var")]
     pub git_user_email: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_pathbuf_env_var")]
     pub git_executable: Option<PathBuf>,
     #[serde(skip)]
-    #[serde(default, deserialize_with = "deserialize_optional_env_var")]
     pub runtime_provider_name: Option<String>,
 }
 
@@ -256,7 +247,7 @@ impl LocalProvider {
     fn persist_git_settings_to_config(&self) -> Result<()> {
         debug!("Saving updated config (only current local provider)");
 
-        let mut cfg = load_config().with_context(|| "failed to load existing config")?;
+        let mut cfg = load_config(true).with_context(|| "failed to load existing config")?;
 
         let target_name = self.runtime_provider_name.clone();
         let mut updated = false;

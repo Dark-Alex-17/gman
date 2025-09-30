@@ -1,8 +1,8 @@
 use crate::command::preview_command;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use clap_complete::CompletionCandidate;
 use futures::future::join_all;
-use gman::config::{Config, RunConfig, load_config};
+use gman::config::{load_config, Config, RunConfig};
 use log::{debug, error};
 use regex::Regex;
 use std::collections::HashMap;
@@ -257,7 +257,7 @@ pub fn parse_args(
 
 pub fn run_config_completer(current: &OsStr) -> Vec<CompletionCandidate> {
     let cur = current.to_string_lossy();
-    match load_config() {
+    match load_config(true) {
         Ok(config) => {
             if let Some(run_configs) = config.run_configs {
                 run_configs
@@ -282,7 +282,7 @@ pub fn run_config_completer(current: &OsStr) -> Vec<CompletionCandidate> {
 
 pub fn provider_completer(current: &OsStr) -> Vec<CompletionCandidate> {
     let cur = current.to_string_lossy();
-    match load_config() {
+    match load_config(true) {
         Ok(config) => config
             .providers
             .iter()
@@ -300,7 +300,7 @@ pub fn provider_completer(current: &OsStr) -> Vec<CompletionCandidate> {
 
 pub fn secrets_completer(current: &OsStr) -> Vec<CompletionCandidate> {
     let cur = current.to_string_lossy();
-    match load_config() {
+    match load_config(true) {
         Ok(config) => {
             let mut provider_config = match config.extract_provider_config(None) {
                 Ok(pc) => pc,

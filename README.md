@@ -89,6 +89,7 @@ gman aws sts get-caller-identity
 - [Features](#features)
 - [Installation](#installation)
 - [Configuration](#configuration)
+  - [Environment Variable Interpolation](#environment-variable-interpolation)
 - [Providers](#providers)
   - [Local](#provider-local)
   - [AWS Secrets Manager](#provider-aws_secrets_manager)
@@ -263,9 +264,6 @@ providers:
     aws_profile: ${AWS_PROFILE:-default}  # Uses 'default' if AWS_PROFILE is unset
     aws_region: us-east-1
 ```
-
-**Important Note:** Environment variable interpolation is only supported in string or numeric fields. It is not 
-supported in lists or maps.
 
 ## Providers
 `gman` supports multiple providers for secret storage. The default provider is `local`, which stores secrets in an 

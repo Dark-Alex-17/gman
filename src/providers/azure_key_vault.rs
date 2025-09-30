@@ -1,4 +1,3 @@
-use crate::config::deserialize_optional_env_var;
 use crate::providers::SecretProvider;
 use anyhow::{Context, Result};
 use azure_identity::DefaultAzureCredential;
@@ -31,7 +30,6 @@ use validator::Validate;
 #[serde(deny_unknown_fields)]
 pub struct AzureKeyVaultProvider {
     #[validate(required)]
-    #[serde(default, deserialize_with = "deserialize_optional_env_var")]
     pub vault_name: Option<String>,
 }
 
