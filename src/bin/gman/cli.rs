@@ -280,6 +280,27 @@ pub fn run_config_completer(current: &OsStr) -> Vec<CompletionCandidate> {
     }
 }
 
+pub fn provider_completer(current: &OsStr) -> Vec<CompletionCandidate> {
+	let cur = current.to_string_lossy();
+	match load_config() {
+		Ok(config) => {
+			config.providers
+					.iter()
+					.filter(|pc| {
+						pc.name
+							.as_ref()
+							.expect("run config has no name")
+							.starts_with(&*cur)
+					})
+					.map(|pc| {
+						CompletionCandidate::new(pc.name.as_ref().expect("provider has no name"))
+					})
+					.collect()
+		}
+		Err(_) => vec![],
+	}
+}
+
 pub fn secrets_completer(current: &OsStr) -> Vec<CompletionCandidate> {
     let cur = current.to_string_lossy();
     match load_config() {

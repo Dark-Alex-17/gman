@@ -1,3 +1,4 @@
+use crate::cli::provider_completer;
 use crate::cli::run_config_completer;
 use crate::cli::secrets_completer;
 use anyhow::{Context, Result};
@@ -51,7 +52,7 @@ struct Cli {
     output: Option<OutputFormat>,
 
     /// Specify the secret provider to use (defaults to 'default_provider' in config (usually 'local'))
-    #[arg(long, global = true, env = "GMAN_PROVIDER", value_parser = ["local", "aws_secrets_manager", "azure_key_vault", "gcp_secret_manager", "gopass"])]
+    #[arg(long, global = true, env = "GMAN_PROVIDER", add = ArgValueCompleter::new(provider_completer))]
     provider: Option<String>,
 
     /// Specify a run profile to use when wrapping a command
