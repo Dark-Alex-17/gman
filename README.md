@@ -94,6 +94,7 @@ gman aws sts get-caller-identity
   - [AWS Secrets Manager](#provider-aws_secrets_manager)
   - [GCP Secret Manager](#provider-gcp_secret_manager)
   - [Azure Key Vault](#provider-azure_key_vault)
+  - [Gopass](#provider-gopass)
 - [Run Configurations](#run-configurations) 
   - [Specifying a Default Provider per Run Config](#specifying-a-default-provider-per-run-config)
   - [Environment Variable Secret Injection](#environment-variable-secret-injection)
