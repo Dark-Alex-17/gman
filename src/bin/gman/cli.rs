@@ -281,24 +281,21 @@ pub fn run_config_completer(current: &OsStr) -> Vec<CompletionCandidate> {
 }
 
 pub fn provider_completer(current: &OsStr) -> Vec<CompletionCandidate> {
-	let cur = current.to_string_lossy();
-	match load_config() {
-		Ok(config) => {
-			config.providers
-					.iter()
-					.filter(|pc| {
-						pc.name
-							.as_ref()
-							.expect("run config has no name")
-							.starts_with(&*cur)
-					})
-					.map(|pc| {
-						CompletionCandidate::new(pc.name.as_ref().expect("provider has no name"))
-					})
-					.collect()
-		}
-		Err(_) => vec![],
-	}
+    let cur = current.to_string_lossy();
+    match load_config() {
+        Ok(config) => config
+            .providers
+            .iter()
+            .filter(|pc| {
+                pc.name
+                    .as_ref()
+                    .expect("run config has no name")
+                    .starts_with(&*cur)
+            })
+            .map(|pc| CompletionCandidate::new(pc.name.as_ref().expect("provider has no name")))
+            .collect(),
+        Err(_) => vec![],
+    }
 }
 
 pub fn secrets_completer(current: &OsStr) -> Vec<CompletionCandidate> {
@@ -328,8 +325,11 @@ mod tests {
     use crate::cli::generate_files_secret_injections;
     use gman::config::{Config, RunConfig};
     use pretty_assertions::{assert_eq, assert_str_eq};
+    use serial_test::serial;
     use std::collections::HashMap;
+    use std::env as std_env;
     use std::ffi::OsString;
+    use tempfile::tempdir;
 
     #[test]
     fn test_generate_files_secret_injections() {
@@ -429,5 +429,122 @@ mod tests {
             .await
             .expect_err("expected failed secret resolution in dry_run");
         assert!(err.to_string().contains("Failed to fetch"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_run_config_completer_filters_by_prefix() {
+        let td = tempdir().unwrap();
+        let xdg = td.path().join("xdg");
+        let app_dir = xdg.join("gman");
+        fs::create_dir_all(&app_dir).unwrap();
+        unsafe { std_env::set_var("XDG_CONFIG_HOME", &xdg) };
+
+        let yaml = indoc::indoc! {
+            "---
+            default_provider: local
+            providers:
+              - name: local
+                type: local
+            run_configs:
+              - name: echo
+                secrets: [API_KEY]
+              - name: docker
+                secrets: [DB_PASSWORD]
+              - name: aws
+                secrets: [AWS_ACCESS_KEY_ID]
+            "
+        };
+        fs::write(app_dir.join("config.yml"), yaml).unwrap();
+
+        let out = run_config_completer(OsStr::new("do"));
+        assert_eq!(out.len(), 1);
+        // Compare via debug string to avoid depending on crate internals
+        let rendered = format!("{:?}", &out[0]);
+        assert!(rendered.contains("docker"), "got: {}", rendered);
+
+        unsafe { std_env::remove_var("XDG_CONFIG_HOME") };
+    }
+
+    #[test]
+    #[serial]
+    fn test_provider_completer_lists_matching_providers() {
+        let td = tempdir().unwrap();
+        let xdg = td.path().join("xdg");
+        let app_dir = xdg.join("gman");
+        fs::create_dir_all(&app_dir).unwrap();
+        unsafe { std_env::set_var("XDG_CONFIG_HOME", &xdg) };
+
+        let yaml = indoc::indoc! {
+            "---
+            default_provider: local
+            providers:
+              - name: local
+                type: local
+              - name: prod
+                type: local
+            run_configs:
+              - name: echo
+                secrets: [API_KEY]
+            "
+        };
+        fs::write(app_dir.join("config.yml"), yaml).unwrap();
+
+        // Prefix 'p' should match only 'prod'
+        let out = provider_completer(OsStr::new("p"));
+        assert_eq!(out.len(), 1);
+        let rendered = format!("{:?}", &out[0]);
+        assert!(rendered.contains("prod"), "got: {}", rendered);
+
+        // Empty prefix returns at least both providers
+        let out_all = provider_completer(OsStr::new(""));
+        assert!(out_all.len() >= 2);
+
+        unsafe { std_env::remove_var("XDG_CONFIG_HOME") };
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
+    async fn test_secrets_completer_filters_keys_by_prefix() {
+        let td = tempdir().unwrap();
+        let xdg = td.path().join("xdg");
+        let app_dir = xdg.join("gman");
+        fs::create_dir_all(&app_dir).unwrap();
+        unsafe { std_env::set_var("XDG_CONFIG_HOME", &xdg) };
+
+        let yaml = indoc::indoc! {
+            "---
+            default_provider: local
+            providers:
+              - name: local
+                type: local
+            run_configs:
+              - name: echo
+                secrets: [API_KEY]
+            "
+        };
+        fs::write(app_dir.join("config.yml"), yaml).unwrap();
+
+        // Seed a minimal vault with keys (values are irrelevant for listing)
+        let vault_yaml = indoc::indoc! {
+            "---
+            API_KEY: dummy
+            DB_PASSWORD: dummy
+            AWS_ACCESS_KEY_ID: dummy
+            "
+        };
+        fs::write(app_dir.join("vault.yml"), vault_yaml).unwrap();
+
+        let out = secrets_completer(OsStr::new("AWS"));
+        assert_eq!(out.len(), 1);
+        let rendered = format!("{:?}", &out[0]);
+        assert!(rendered.contains("AWS_ACCESS_KEY_ID"), "got: {}", rendered);
+
+        let out2 = secrets_completer(OsStr::new("DB_"));
+        assert_eq!(out2.len(), 1);
+        let rendered2 = format!("{:?}", &out2[0]);
+        assert!(rendered2.contains("DB_PASSWORD"), "got: {}", rendered2);
+
+        unsafe { std_env::remove_var("XDG_CONFIG_HOME") };
     }
 }

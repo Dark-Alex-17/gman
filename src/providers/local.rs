@@ -1,3 +1,5 @@
+use crate::config::deserialize_optional_env_var;
+use crate::config::deserialize_optional_pathbuf_env_var;
 use anyhow::{Context, anyhow, bail};
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
@@ -50,14 +52,21 @@ use validator::Validate;
 #[derive(Debug, Clone, Validate, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct LocalProvider {
+    #[serde(default, deserialize_with = "deserialize_optional_pathbuf_env_var")]
     pub password_file: Option<PathBuf>,
+    #[serde(default, deserialize_with = "deserialize_optional_env_var")]
     pub git_branch: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_env_var")]
     pub git_remote_url: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_env_var")]
     pub git_user_name: Option<String>,
     #[validate(email)]
+    #[serde(default, deserialize_with = "deserialize_optional_env_var")]
     pub git_user_email: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_pathbuf_env_var")]
     pub git_executable: Option<PathBuf>,
     #[serde(skip)]
+    #[serde(default, deserialize_with = "deserialize_optional_env_var")]
     pub runtime_provider_name: Option<String>,
 }
 

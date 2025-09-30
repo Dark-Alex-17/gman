@@ -242,6 +242,31 @@ providers:
 run_configs: []
 ```
 
+### Environment Variable Interpolation
+The config file supports environment variable interpolation using `${VAR_NAME}` syntax. For example, to use an
+AWS profile from your environment:
+
+```yaml
+providers:
+  - name: aws
+    type: aws_secrets_manager
+    aws_profile: ${AWS_PROFILE}  # Uses the AWS_PROFILE env var
+    aws_region: us-east-1
+```
+
+Or to set a default profile to use when `AWS_PROFILE` is unset:
+
+```yaml
+providers:
+  - name: aws
+    type: aws_secrets_manager
+    aws_profile: ${AWS_PROFILE:-default}  # Uses 'default' if AWS_PROFILE is unset
+    aws_region: us-east-1
+```
+
+**Important Note:** Environment variable interpolation is only supported in string or numeric fields. It is not 
+supported in lists or maps.
+
 ## Providers
 `gman` supports multiple providers for secret storage. The default provider is `local`, which stores secrets in an 
 encrypted file on your filesystem. The CLI and config format are designed to be extensible so new providers can be

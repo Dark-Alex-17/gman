@@ -1,3 +1,4 @@
+use crate::config::deserialize_optional_env_var;
 use crate::providers::SecretProvider;
 use anyhow::Context;
 use anyhow::Result;
@@ -32,8 +33,10 @@ use validator::Validate;
 #[serde(deny_unknown_fields)]
 pub struct AwsSecretsManagerProvider {
     #[validate(required)]
+    #[serde(default, deserialize_with = "deserialize_optional_env_var")]
     pub aws_profile: Option<String>,
     #[validate(required)]
+    #[serde(default, deserialize_with = "deserialize_optional_env_var")]
     pub aws_region: Option<String>,
 }
 

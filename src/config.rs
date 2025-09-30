@@ -26,6 +26,7 @@ use crate::providers::{SecretProvider, SupportedProvider};
 use anyhow::{Context, Result};
 use collections::HashSet;
 use log::debug;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use serde_with::skip_serializing_none;
@@ -45,14 +46,19 @@ use validator::{Validate, ValidationError};
 #[validate(schema(function = "flags_or_files"))]
 pub struct RunConfig {
     #[validate(required)]
+    #[serde(default, deserialize_with = "deserialize_optional_env_var")]
     pub name: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_env_var")]
     pub provider: Option<String>,
     #[validate(required)]
     pub secrets: Option<Vec<String>>,
     pub files: Option<Vec<PathBuf>>,
+    #[serde(default, deserialize_with = "deserialize_optional_env_var")]
     pub flag: Option<String>,
     #[validate(range(min = 1))]
+    #[serde(default, deserialize_with = "deserialize_optional_usize_env_var")]
     pub flag_position: Option<usize>,
+    #[serde(default, deserialize_with = "deserialize_optional_env_var")]
     pub arg_format: Option<String>,
 }
 
@@ -192,6 +198,7 @@ impl ProviderConfig {
 #[validate(schema(function = "default_provider_exists"))]
 #[validate(schema(function = "providers_names_are_unique"))]
 pub struct Config {
+    #[serde(deserialize_with = "deserialize_optional_env_var")]
     pub default_provider: Option<String>,
     #[validate(length(min = 1))]
     #[validate(nested)]
@@ -331,7 +338,7 @@ pub fn load_config() -> Result<Config> {
     Ok(config)
 }
 
-/// Returns the configuration file path that `confy` will use for this app.
+/// Returns the configuration file path that `confy` will use
 pub fn get_config_file_path() -> Result<PathBuf> {
     if let Some(base) = env::var_os("XDG_CONFIG_HOME").map(PathBuf::from) {
         let dir = base.join("gman");
@@ -340,8 +347,394 @@ pub fn get_config_file_path() -> Result<PathBuf> {
         if yml.exists() || yaml.exists() {
             return Ok(if yml.exists() { yml } else { yaml });
         }
-        // Prefer .yml if creating anew
         return Ok(dir.join("config.yml"));
     }
     Ok(confy::get_configuration_file_path("gman", "config")?)
+}
+
+pub fn deserialize_optional_env_var<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s: Option<String> = Option::deserialize(deserializer)?;
+    match s {
+        Some(value) => {
+            let interpolated = interpolate_env_vars(&value);
+            Ok(Some(interpolated))
+        }
+        None => Ok(None),
+    }
+}
+
+pub fn deserialize_optional_pathbuf_env_var<'de, D>(
+    deserializer: D,
+) -> Result<Option<PathBuf>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s: Option<String> = Option::deserialize(deserializer)?;
+    match s {
+        Some(value) => {
+            let interpolated = interpolate_env_vars(&value);
+            Ok(Some(interpolated.parse().unwrap()))
+        }
+        None => Ok(None),
+    }
+}
+
+fn deserialize_optional_usize_env_var<'de, D>(deserializer: D) -> Result<Option<usize>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s: Option<String> = Option::deserialize(deserializer)?;
+    match s {
+        Some(value) => {
+            let interpolated = interpolate_env_vars(&value);
+            interpolated
+                .parse::<usize>()
+                .map(Some)
+                .map_err(serde::de::Error::custom)
+        }
+        None => Ok(None),
+    }
+}
+
+pub fn interpolate_env_vars(s: &str) -> String {
+    let result = s.to_string();
+    let scrubbing_regex = Regex::new(r#"[\s{}^()\[\]\\|`'"]+"#).unwrap();
+    let var_regex = Regex::new(r"\$\{(.*?)(:-.+)?}").unwrap();
+
+    var_regex
+        .replace_all(s, |caps: &regex::Captures<'_>| {
+            if let Some(mat) = caps.get(1) {
+                if let Ok(value) = env::var(mat.as_str()) {
+                    return scrubbing_regex.replace_all(&value, "").to_string();
+                } else if let Some(default_value) = caps.get(2) {
+                    return scrubbing_regex
+                        .replace_all(
+                            default_value
+                                .as_str()
+                                .strip_prefix(":-")
+                                .expect("unable to strip ':-' prefix from default value"),
+                            "",
+                        )
+                        .to_string();
+                }
+            }
+
+            scrubbing_regex.replace_all(&result, "").to_string()
+        })
+        .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use indoc::indoc;
+    use pretty_assertions::{assert_eq, assert_str_eq};
+    use serde::Deserialize;
+    use serial_test::serial;
+    use std::path::PathBuf;
+
+    #[derive(Default, Deserialize, PartialEq, Eq, Debug)]
+    struct TestConfig {
+        #[serde(default, deserialize_with = "deserialize_optional_env_var")]
+        string_var: Option<String>,
+        #[serde(default, deserialize_with = "deserialize_optional_pathbuf_env_var")]
+        path_var: Option<PathBuf>,
+        #[serde(default, deserialize_with = "deserialize_optional_usize_env_var")]
+        usize_var: Option<usize>,
+    }
+
+    #[test]
+    #[serial]
+    fn test_deserialize_optional_env_var_is_present() {
+        unsafe { env::set_var("TEST_VAR_DESERIALIZE_OPTION", "localhost") };
+        let yaml_data = indoc!(
+            r#"
+							string_var: ${TEST_VAR_DESERIALIZE_OPTION}
+							path_var: /some/path
+							usize_var: 123
+						"#
+        );
+
+        let config: TestConfig = serde_yaml::from_str(yaml_data).unwrap();
+
+        assert_eq!(config.string_var, Some("localhost".to_string()));
+        assert_eq!(config.path_var, Some(PathBuf::from("/some/path")));
+        assert_eq!(config.usize_var, Some(123));
+        unsafe { env::remove_var("TEST_VAR_DESERIALIZE_OPTION") };
+    }
+
+    #[test]
+    fn test_deserialize_optional_env_var_empty_env_var_uses_default_value_if_provided() {
+        let yaml_data = indoc!(
+            r#"
+							string_var: ${TEST_VAR_DESERIALIZE_OPTION_UNDEFINED:-localhost}
+							path_var: /some/path
+							usize_var: 123
+						"#
+        );
+
+        let config: TestConfig = serde_yaml::from_str(yaml_data).unwrap();
+
+        assert_eq!(config.string_var, Some("localhost".to_string()));
+        assert_eq!(config.path_var, Some(PathBuf::from("/some/path")));
+        assert_eq!(config.usize_var, Some(123));
+    }
+
+    #[test]
+    #[serial]
+    fn test_deserialize_optional_env_var_does_not_overwrite_non_env_value() {
+        unsafe { env::set_var("TEST_VAR_DESERIALIZE_OPTION_NO_OVERWRITE", "localhost") };
+        let yaml_data = indoc!(
+            r#"
+							string_var: www.example.com
+							path_var: /some/path
+							usize_var: 123
+						"#
+        );
+
+        let config: TestConfig = serde_yaml::from_str(yaml_data).unwrap();
+
+        assert_eq!(config.string_var, Some("www.example.com".to_string()));
+        assert_eq!(config.path_var, Some(PathBuf::from("/some/path")));
+        assert_eq!(config.usize_var, Some(123));
+        unsafe { env::remove_var("TEST_VAR_DESERIALIZE_OPTION_NO_OVERWRITE") };
+    }
+
+    #[test]
+    fn test_deserialize_optional_env_var_empty() {
+        let yaml_data = indoc!(
+            r#"
+							path_var: /some/path
+							usize_var: 123
+						"#
+        );
+
+        let config: TestConfig = serde_yaml::from_str(yaml_data).unwrap();
+
+        assert_eq!(config.string_var, None);
+        assert_eq!(config.path_var, Some(PathBuf::from("/some/path")));
+        assert_eq!(config.usize_var, Some(123));
+    }
+
+    #[test]
+    #[serial]
+    fn test_deserialize_optional_pathbuf_env_var_is_present() {
+        unsafe { env::set_var("TEST_VAR_DESERIALIZE_OPTION_PATHBUF", "/some/path") };
+        let yaml_data = indoc!(
+            r#"
+								string_var: hithere
+								path_var: ${TEST_VAR_DESERIALIZE_OPTION_PATHBUF}
+								usize_var: 123
+							"#
+        );
+
+        let config: TestConfig = serde_yaml::from_str(yaml_data).unwrap();
+
+        assert_eq!(config.path_var, Some(PathBuf::from("/some/path")));
+        assert_eq!(config.string_var, Some("hithere".to_string()));
+        assert_eq!(config.usize_var, Some(123));
+        unsafe { env::remove_var("TEST_VAR_DESERIALIZE_OPTION_PATHBUF") };
+    }
+
+    #[test]
+    fn test_deserialize_optional_pathbuf_env_var_empty_env_var_uses_default_value_if_provided() {
+        let yaml_data = indoc!(
+            r#"
+								string_var: hithere
+								path_var: ${TEST_VAR_DESERIALIZE_OPTION_PATHBUF_UNDEFINED:-/some/path}
+								usize_var: 123
+							"#
+        );
+
+        let config: TestConfig = serde_yaml::from_str(yaml_data).unwrap();
+
+        assert_eq!(config.path_var, Some(PathBuf::from("/some/path")));
+        assert_eq!(config.string_var, Some("hithere".to_string()));
+        assert_eq!(config.usize_var, Some(123));
+    }
+
+    #[test]
+    #[serial]
+    fn test_deserialize_optional_pathbuf_env_var_does_not_overwrite_non_env_value() {
+        unsafe {
+            env::set_var(
+                "TEST_VAR_DESERIALIZE_OPTION_PATHBUF_NO_OVERWRITE",
+                "/something/else",
+            )
+        };
+        let yaml_data = indoc!(
+            r#"
+								string_var: hithere
+								path_var: /some/path
+								usize_var: 123
+							"#
+        );
+
+        let config: TestConfig = serde_yaml::from_str(yaml_data).unwrap();
+
+        assert_eq!(config.path_var, Some(PathBuf::from("/some/path")));
+        assert_eq!(config.string_var, Some("hithere".to_string()));
+        assert_eq!(config.usize_var, Some(123));
+        unsafe { env::remove_var("TEST_VAR_DESERIALIZE_OPTION_PATHBUF_NO_OVERWRITE") };
+    }
+
+    #[test]
+    fn test_deserialize_optional_pathbuf_env_var_empty() {
+        let yaml_data = indoc!(
+            r#"
+								string_var: hithere
+								usize_var: 123
+							"#
+        );
+
+        let config: TestConfig = serde_yaml::from_str(yaml_data).unwrap();
+
+        assert_eq!(config.string_var, Some("hithere".to_string()));
+        assert_eq!(config.path_var, None);
+        assert_eq!(config.usize_var, Some(123));
+    }
+
+    #[test]
+    #[serial]
+    fn test_deserialize_optional_usize_env_var_is_present() {
+        unsafe { env::set_var("TEST_VAR_DESERIALIZE_OPTION_USIZE", "123") };
+        let yaml_data = indoc!(
+            r#"
+							string_var: hithere
+							path_var: /some/path
+							usize_var: ${TEST_VAR_DESERIALIZE_OPTION_USIZE}
+						"#
+        );
+
+        let config: TestConfig = serde_yaml::from_str(yaml_data).unwrap();
+
+        assert_eq!(config.usize_var, Some(123));
+        assert_eq!(config.string_var, Some("hithere".to_string()));
+        assert_eq!(config.path_var, Some(PathBuf::from("/some/path")));
+        unsafe { env::remove_var("TEST_VAR_DESERIALIZE_OPTION_USIZE") };
+    }
+
+    #[test]
+    fn test_deserialize_optional_usize_env_var_uses_default_value_if_provided() {
+        let yaml_data = indoc!(
+            r#"
+							string_var: hithere
+							path_var: /some/path
+							usize_var: ${TEST_VAR_DESERIALIZE_OPTION_USIZE_UNDEFINED:-123}
+						"#
+        );
+
+        let config: TestConfig = serde_yaml::from_str(yaml_data).unwrap();
+
+        assert_eq!(config.usize_var, Some(123));
+        assert_eq!(config.string_var, Some("hithere".to_string()));
+        assert_eq!(config.path_var, Some(PathBuf::from("/some/path")));
+    }
+
+    #[test]
+    #[serial]
+    fn test_deserialize_optional_usize_env_var_does_not_overwrite_non_env_value() {
+        unsafe { env::set_var("TEST_VAR_DESERIALIZE_OPTION_NO_OVERWRITE_USIZE", "456") };
+        let yaml_data = indoc!(
+            r#"
+								string_var: hithere
+								path_var: /some/path
+								usize_var: 123
+						"#
+        );
+
+        let config: TestConfig = serde_yaml::from_str(yaml_data).unwrap();
+
+        assert_eq!(config.usize_var, Some(123));
+        assert_eq!(config.string_var, Some("hithere".to_string()));
+        assert_eq!(config.path_var, Some(PathBuf::from("/some/path")));
+        unsafe { env::remove_var("TEST_VAR_DESERIALIZE_OPTION_NO_OVERWRITE_USIZE") };
+    }
+
+    #[test]
+    fn test_deserialize_optional_usize_env_var_invalid_number() {
+        let yaml_data = indoc!(
+            r#"
+								string_var: hithere
+								path_var: /some/path
+								usize_var: "holo"
+						"#
+        );
+        let result: Result<TestConfig, _> = serde_yaml::from_str(yaml_data);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("invalid digit found in string"));
+    }
+
+    #[test]
+    fn test_deserialize_optional_usize_env_var_empty() {
+        let yaml_data = indoc!(
+            r#"
+							string_var: hithere
+							path_var: /some/path
+						"#
+        );
+
+        let config: TestConfig = serde_yaml::from_str(yaml_data).unwrap();
+
+        assert_eq!(config.usize_var, None);
+        assert_eq!(config.string_var, Some("hithere".to_string()));
+        assert_eq!(config.path_var, Some(PathBuf::from("/some/path")));
+    }
+
+    #[test]
+    fn test_interpolate_env_vars_defaults_to_original_string_if_not_in_yaml_interpolation_format() {
+        let var = interpolate_env_vars("TEST_VAR_INTERPOLATION_NON_YAML");
+
+        assert_str_eq!(var, "TEST_VAR_INTERPOLATION_NON_YAML");
+    }
+
+    #[test]
+    #[serial]
+    fn test_interpolate_env_vars_scrubs_all_unnecessary_characters() {
+        unsafe {
+            env::set_var(
+                "TEST_VAR_INTERPOLATION_UNNECESSARY_CHARACTERS",
+                r#"""
+						`"'https://dontdo:this@testing.com/query?test=%20query#results'"` {([\|])}
+				"""#,
+            )
+        };
+
+        let var = interpolate_env_vars("${TEST_VAR_INTERPOLATION_UNNECESSARY_CHARACTERS}");
+
+        assert_str_eq!(
+            var,
+            "https://dontdo:this@testing.com/query?test=%20query#results"
+        );
+        unsafe { env::remove_var("TEST_VAR_INTERPOLATION_UNNECESSARY_CHARACTERS") };
+    }
+
+    #[test]
+    #[serial]
+    fn test_interpolate_env_vars_scrubs_all_unnecessary_characters_for_default_values() {
+        let var = interpolate_env_vars(
+            r#"${UNSET:-`"'https://dontdo:this@testing.com/query?test=%20query#results'"` {([\|])}}"#,
+        );
+
+        assert_str_eq!(
+            var,
+            "https://dontdo:this@testing.com/query?test=%20query#results"
+        );
+    }
+
+    #[test]
+    fn test_interpolate_env_vars_scrubs_all_unnecessary_characters_from_non_environment_variable() {
+        let var =
+            interpolate_env_vars("https://dontdo:this@testing.com/query?test=%20query#results");
+
+        assert_str_eq!(
+            var,
+            "https://dontdo:this@testing.com/query?test=%20query#results"
+        );
+    }
 }
