@@ -1,14 +1,14 @@
-use anyhow::{anyhow, bail, Context};
+use anyhow::{Context, anyhow, bail};
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::{env, fs};
 use zeroize::Zeroize;
 
-use crate::config::{get_config_file_path, load_config, Config};
+use crate::config::{Config, get_config_file_path, load_config};
 use crate::providers::git_sync::{
-    default_git_email, default_git_username, ensure_git_available, repo_name_from_url, resolve_git,
-    sync_and_push, SyncOpts,
+    SyncOpts, default_git_email, default_git_username, ensure_git_available, repo_name_from_url,
+    resolve_git, sync_and_push,
 };
 use crate::providers::{SecretProvider, SupportedProvider};
 use crate::{
@@ -16,13 +16,13 @@ use crate::{
 };
 use anyhow::Result;
 use argon2::{Algorithm, Argon2, Params, Version};
-use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use chacha20poly1305::aead::rand_core::RngCore;
 use chacha20poly1305::{
-    aead::{Aead, KeyInit, OsRng},
     Key, XChaCha20Poly1305, XNonce,
+    aead::{Aead, KeyInit, OsRng},
 };
-use dialoguer::{theme, Input};
+use dialoguer::{Input, theme};
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;

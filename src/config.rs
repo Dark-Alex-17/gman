@@ -300,13 +300,11 @@ pub fn load_config(interpolate: bool) -> Result<Config> {
         let yaml = app_dir.join("config.yaml");
         if yml.exists() || yaml.exists() {
             let load_path = if yml.exists() { &yml } else { &yaml };
-            let mut content =
-                fs::read_to_string(load_path).with_context(|| {
-                    format!("failed to read config file '{}'", load_path.display())
-                })?;
-					if interpolate {
-						content = interpolate_env_vars(&content);
-					}
+            let mut content = fs::read_to_string(load_path)
+                .with_context(|| format!("failed to read config file '{}'", load_path.display()))?;
+            if interpolate {
+                content = interpolate_env_vars(&content);
+            }
             let cfg: Config = serde_yaml::from_str(&content).with_context(|| {
                 format!("failed to parse YAML config at '{}'", load_path.display())
             })?;
@@ -340,12 +338,11 @@ pub fn load_config(interpolate: bool) -> Result<Config> {
 
 fn load_confy_config(interpolate: bool) -> Result<Config> {
     let load_path = confy::get_configuration_file_path("gman", "config")?;
-    let mut content =
-        fs::read_to_string(&load_path)
-            .with_context(|| format!("failed to read config file '{}'", load_path.display()))?;
-		if interpolate {
-			content = interpolate_env_vars(&content);
-		}
+    let mut content = fs::read_to_string(&load_path)
+        .with_context(|| format!("failed to read config file '{}'", load_path.display()))?;
+    if interpolate {
+        content = interpolate_env_vars(&content);
+    }
     let cfg: Config = serde_yaml::from_str(&content)
         .with_context(|| format!("failed to parse YAML config at '{}'", load_path.display()))?;
 
