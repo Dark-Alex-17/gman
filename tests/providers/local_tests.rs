@@ -58,10 +58,11 @@ fn test_local_provider_invalid_email() {
 #[test]
 fn test_local_provider_default() {
     let provider = LocalProvider::default();
-    assert_eq!(
-        provider.password_file,
-        Config::local_provider_password_file()
-    );
+    let expected_pw = {
+        let p = Config::local_provider_password_file();
+        if p.exists() { Some(p) } else { None }
+    };
+    assert_eq!(provider.password_file, expected_pw);
     assert_eq!(provider.git_branch, Some("main".into()));
     assert_eq!(provider.git_remote_url, None);
     assert_eq!(provider.git_user_name, None);

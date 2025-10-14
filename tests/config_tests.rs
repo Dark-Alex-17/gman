@@ -252,16 +252,14 @@ mod tests {
     #[test]
     fn test_config_local_provider_password_file() {
         let path = Config::local_provider_password_file();
-        let expected_path = dirs::home_dir().map(|p| p.join(".gman_password"));
-        if let Some(p) = &expected_path {
-            if !p.exists() {
-                assert_eq!(path, None);
-            } else {
-                assert_eq!(path, expected_path);
-            }
-        } else {
-            assert_eq!(path, None);
-        }
+        // Derive expected filename based on current test executable name
+        let exe = std::env::current_exe().expect("current_exe");
+        let stem = exe
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .expect("utf-8 file stem");
+        let expected = dirs::home_dir().map(|p| p.join(format!(".{}_password", stem)));
+        assert_eq!(Some(path), expected);
     }
 
     #[test]

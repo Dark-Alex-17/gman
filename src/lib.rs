@@ -20,6 +20,7 @@
 //! The `config` and `providers` modules power the CLI. They can be embedded
 //! in other programs, but many functions interact with the user or the
 //! filesystem. Prefer `no_run` doctests for those.
+
 use anyhow::{Context, Result, anyhow, bail};
 use argon2::{
     Algorithm, Argon2, Params, Version,
@@ -31,6 +32,7 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit, OsRng},
 };
 use secrecy::{ExposeSecret, SecretString};
+use std::path::PathBuf;
 use zeroize::Zeroize;
 /// Configuration structures and helpers used by the CLI and library.
 pub mod config;
@@ -205,6 +207,14 @@ pub fn decrypt_string(password: impl Into<SecretString>, envelope: &str) -> Resu
 
     let s = String::from_utf8(pt).context("plaintext not valid UTF-8")?;
     Ok(s)
+}
+
+pub(crate) fn calling_app_name() -> String {
+    let exe: PathBuf = std::env::current_exe().expect("unable to get current exe path");
+    exe.file_stem()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_owned())
+        .expect("executable name not valid UTF-8")
 }
 
 #[cfg(test)]

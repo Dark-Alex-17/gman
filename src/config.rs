@@ -21,6 +21,7 @@
 //! rc.validate().unwrap();
 //! ```
 
+use crate::calling_app_name;
 use crate::providers::local::LocalProvider;
 use crate::providers::{SecretProvider, SupportedProvider};
 use anyhow::{Context, Result};
@@ -268,21 +269,18 @@ impl Config {
 
     /// Discover the default password file for the local provider.
     ///
-    /// On most systems this resolves to `~/.gman_password` when the file
-    /// exists, otherwise `None`.
-    pub fn local_provider_password_file() -> Option<PathBuf> {
-        let candidate = dirs::home_dir().map(|p| p.join(".gman_password"));
-        match candidate {
-            Some(p) if p.exists() => Some(p),
-            _ => None,
-        }
+    /// On most systems this resolves to `~/.<executable_name>_password`
+    pub fn local_provider_password_file() -> PathBuf {
+        dirs::home_dir()
+            .map(|p| p.join(format!(".{}_password", calling_app_name())))
+            .expect("unable to determine home directory for local provider password file")
     }
 }
 
 /// Load and validate the application configuration.
 ///
 /// This uses the `confy` crate to load the configuration from a file
-/// (e.g. `~/.config/gman/config.yaml`). If the file does
+/// (e.g. `~/.config/<executable_name>/config.yaml`). If the file does
 /// not exist, a default configuration is created and saved.
 ///
 /// ```no_run
@@ -295,7 +293,7 @@ pub fn load_config(interpolate: bool) -> Result<Config> {
     let xdg_path = env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
 
     let mut config: Config = if let Some(base) = xdg_path.as_ref() {
-        let app_dir = base.join("gman");
+        let app_dir = base.join(calling_app_name());
         let yml = app_dir.join("config.yml");
         let yaml = app_dir.join("config.yaml");
         if yml.exists() || yaml.exists() {
@@ -327,9 +325,9 @@ pub fn load_config(interpolate: bool) -> Result<Config> {
                 ref mut provider_def,
             } = p.provider_type
                 && provider_def.password_file.is_none()
-                && let Some(local_password_file) = Config::local_provider_password_file()
+                && Config::local_provider_password_file().exists()
             {
-                provider_def.password_file = Some(local_password_file);
+                provider_def.password_file = Some(Config::local_provider_password_file());
             }
         });
 
@@ -337,7 +335,7 @@ pub fn load_config(interpolate: bool) -> Result<Config> {
 }
 
 fn load_confy_config(interpolate: bool) -> Result<Config> {
-    let load_path = confy::get_configuration_file_path("gman", "config")?;
+    let load_path = confy::get_configuration_file_path(&calling_app_name(), "config")?;
     let mut content = fs::read_to_string(&load_path)
         .with_context(|| format!("failed to read config file '{}'", load_path.display()))?;
     if interpolate {
@@ -352,7 +350,7 @@ fn load_confy_config(interpolate: bool) -> Result<Config> {
 /// Returns the configuration file path that `confy` will use
 pub fn get_config_file_path() -> Result<PathBuf> {
     if let Some(base) = env::var_os("XDG_CONFIG_HOME").map(PathBuf::from) {
-        let dir = base.join("gman");
+        let dir = base.join(calling_app_name());
         let yml = dir.join("config.yml");
         let yaml = dir.join("config.yaml");
         if yml.exists() || yaml.exists() {
@@ -360,7 +358,10 @@ pub fn get_config_file_path() -> Result<PathBuf> {
         }
         return Ok(dir.join("config.yml"));
     }
-    Ok(confy::get_configuration_file_path("gman", "config")?)
+    Ok(confy::get_configuration_file_path(
+        &calling_app_name(),
+        "config",
+    )?)
 }
 
 pub fn interpolate_env_vars(s: &str) -> String {

@@ -46,7 +46,7 @@ pub fn init_logging_config() -> log4rs::Config {
 
 pub fn get_log_path() -> PathBuf {
     let base_dir = dirs::cache_dir().unwrap_or_else(env::temp_dir);
-    let log_dir = base_dir.join("gman");
+    let log_dir = base_dir.join(env!("CARGO_CRATE_NAME"));
 
     let dir = if let Err(e) = fs::create_dir_all(&log_dir) {
         eprintln!(
@@ -77,7 +77,7 @@ pub fn persist_config_file(config: &Config) -> Result<()> {
         fs::write(&config_path, s)
             .with_context(|| format!("failed to write {}", config_path.display()))?;
     } else {
-        confy::store("gman", "config", config)
+        confy::store(env!("CARGO_CRATE_NAME"), "config", config)
             .with_context(|| "failed to save updated config via confy")?;
     }
 

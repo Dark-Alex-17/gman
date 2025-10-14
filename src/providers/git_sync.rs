@@ -1,3 +1,4 @@
+use crate::calling_app_name;
 use anyhow::{Context, Result, anyhow};
 use chrono::Utc;
 use dialoguer::Confirm;
@@ -25,7 +26,7 @@ pub fn sync_and_push(opts: &SyncOpts<'_>) -> Result<()> {
     opts.validate()
         .with_context(|| "invalid git sync options")?;
     let commit_message = format!("chore: sync @ {}", Utc::now().to_rfc3339());
-    let config_dir = confy::get_configuration_file_path("gman", "vault")
+    let config_dir = confy::get_configuration_file_path(&calling_app_name(), "vault")
         .with_context(|| "get config dir")?
         .parent()
         .map(Path::to_path_buf)
@@ -37,7 +38,7 @@ pub fn sync_and_push(opts: &SyncOpts<'_>) -> Result<()> {
     fs::create_dir_all(&repo_dir).with_context(|| format!("create {}", repo_dir.display()))?;
 
     // Move the default vault into the repo dir on first sync so only vault.yml is tracked.
-    let default_vault = confy::get_configuration_file_path("gman", "vault")
+    let default_vault = confy::get_configuration_file_path(&calling_app_name(), "vault")
         .with_context(|| "get default vault path")?;
     let repo_vault = repo_dir.join("vault.yml");
     if default_vault.exists() && !repo_vault.exists() {

@@ -323,6 +323,7 @@ pub fn secrets_completer(current: &OsStr) -> Vec<CompletionCandidate> {
 mod tests {
     use super::*;
     use crate::cli::generate_files_secret_injections;
+    use gman::config::get_config_file_path;
     use gman::config::{Config, RunConfig};
     use pretty_assertions::{assert_eq, assert_str_eq};
     use serial_test::serial;
@@ -436,9 +437,10 @@ mod tests {
     fn test_run_config_completer_filters_by_prefix() {
         let td = tempdir().unwrap();
         let xdg = td.path().join("xdg");
-        let app_dir = xdg.join("gman");
-        fs::create_dir_all(&app_dir).unwrap();
         unsafe { std_env::set_var("XDG_CONFIG_HOME", &xdg) };
+        let cfg_path = get_config_file_path().unwrap();
+        let app_dir = cfg_path.parent().unwrap().to_path_buf();
+        fs::create_dir_all(&app_dir).unwrap();
 
         let yaml = indoc::indoc! {
             "---
@@ -471,9 +473,10 @@ mod tests {
     fn test_provider_completer_lists_matching_providers() {
         let td = tempdir().unwrap();
         let xdg = td.path().join("xdg");
-        let app_dir = xdg.join("gman");
-        fs::create_dir_all(&app_dir).unwrap();
         unsafe { std_env::set_var("XDG_CONFIG_HOME", &xdg) };
+        let cfg_path = get_config_file_path().unwrap();
+        let app_dir = cfg_path.parent().unwrap().to_path_buf();
+        fs::create_dir_all(&app_dir).unwrap();
 
         let yaml = indoc::indoc! {
             "---
@@ -508,9 +511,10 @@ mod tests {
     async fn test_secrets_completer_filters_keys_by_prefix() {
         let td = tempdir().unwrap();
         let xdg = td.path().join("xdg");
-        let app_dir = xdg.join("gman");
-        fs::create_dir_all(&app_dir).unwrap();
         unsafe { std_env::set_var("XDG_CONFIG_HOME", &xdg) };
+        let cfg_path = get_config_file_path().unwrap();
+        let app_dir = cfg_path.parent().unwrap().to_path_buf();
+        fs::create_dir_all(&app_dir).unwrap();
 
         let yaml = indoc::indoc! {
             "---

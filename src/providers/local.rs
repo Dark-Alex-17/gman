@@ -13,6 +13,7 @@ use crate::providers::git_sync::{
 use crate::providers::{SecretProvider, SupportedProvider};
 use crate::{
     ARGON_M_COST_KIB, ARGON_P, ARGON_T_COST, HEADER, KDF, KEY_LEN, NONCE_LEN, SALT_LEN, VERSION,
+    calling_app_name,
 };
 use anyhow::Result;
 use argon2::{Algorithm, Argon2, Params, Version};
@@ -63,8 +64,13 @@ pub struct LocalProvider {
 
 impl Default for LocalProvider {
     fn default() -> Self {
+        let password_file = match Config::local_provider_password_file() {
+            p if p.exists() => Some(p),
+            _ => None,
+        };
+
         Self {
-            password_file: Config::local_provider_password_file(),
+            password_file,
             git_branch: Some("main".into()),
             git_remote_url: None,
             git_user_name: None,
@@ -286,7 +292,7 @@ impl LocalProvider {
             let s = serde_yaml::to_string(&cfg)?;
             fs::write(&path, s).with_context(|| format!("failed to write {}", path.display()))?;
         } else {
-            confy::store("gman", "config", &cfg)
+            confy::store(&calling_app_name(), "config", &cfg)
                 .with_context(|| "failed to save updated config via confy")?;
         }
 
@@ -335,10 +341,11 @@ fn default_vault_path() -> Result<PathBuf> {
     let xdg_path = env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
 
     if let Some(xdg) = xdg_path {
-        return Ok(xdg.join("gman").join("vault.yml"));
+        return Ok(xdg.join(calling_app_name()).join("vault.yml"));
     }
 
-    confy::get_configuration_file_path("gman", "vault").with_context(|| "get config dir")
+    confy::get_configuration_file_path(&calling_app_name(), "vault")
+        .with_context(|| "get config dir")
 }
 
 fn base_config_dir() -> Result<PathBuf> {
@@ -560,7 +567,7 @@ mod tests {
     fn persist_only_target_local_provider_git_settings() {
         let td = tempdir().unwrap();
         let xdg = td.path().join("xdg");
-        let app_dir = xdg.join("gman");
+        let app_dir = xdg.join(calling_app_name());
         fs::create_dir_all(&app_dir).unwrap();
         unsafe {
             std_env::set_var("XDG_CONFIG_HOME", &xdg);
