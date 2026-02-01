@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use gman::config::{Config, get_config_file_path};
+use gman::config::{get_config_file_path, Config};
 use log::LevelFilter;
 use log4rs::append::console::ConsoleAppender;
 use log4rs::append::file::FileAppender;

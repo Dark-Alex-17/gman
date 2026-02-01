@@ -61,7 +61,7 @@ fn derive_key(password: &SecretString, salt: &[u8]) -> Result<Key> {
         .hash_password_into(password.expose_secret().as_bytes(), salt, &mut key_bytes)
         .map_err(|e| anyhow!("argon2 into error: {:?}", e))?;
 
-    let key = *Key::from_slice(&key_bytes);
+    let key: Key = key_bytes.into();
     key_bytes.zeroize();
     Ok(key)
 }
@@ -93,11 +93,11 @@ pub fn encrypt_string(password: impl Into<SecretString>, plaintext: &str) -> Res
 
     let aad = format!("{};{}", HEADER, VERSION);
 
-    let nonce = XNonce::from_slice(&nonce_bytes);
+    let nonce: XNonce = nonce_bytes.into();
     let mut pt = plaintext.as_bytes().to_vec();
     let ct = cipher
         .encrypt(
-            nonce,
+            &nonce,
             chacha20poly1305::aead::Payload {
                 msg: &pt,
                 aad: aad.as_bytes(),
@@ -179,7 +179,7 @@ pub fn decrypt_string(password: impl Into<SecretString>, envelope: &str) -> Resu
     let ct_b64 = parts[6].strip_prefix("ct=").context("missing ct")?;
 
     let salt_bytes = B64.decode(salt_b64).context("bad salt b64")?;
-    let mut nonce_bytes = B64.decode(nonce_b64).context("bad nonce b64")?;
+    let nonce_bytes = B64.decode(nonce_b64).context("bad nonce b64")?;
     let mut ct = B64.decode(ct_b64).context("bad ct b64")?;
 
     if nonce_bytes.len() != NONCE_LEN {
@@ -191,10 +191,11 @@ pub fn decrypt_string(password: impl Into<SecretString>, envelope: &str) -> Resu
     let cipher = XChaCha20Poly1305::new(&key);
 
     let aad = format!("{};{}", HEADER, VERSION);
-    let nonce = XNonce::from_slice(&nonce_bytes);
+    let mut nonce_arr: [u8; NONCE_LEN] = nonce_bytes.try_into().map_err(|_| anyhow!("invalid nonce length"))?;
+    let nonce: XNonce = nonce_arr.into();
     let pt = cipher
         .decrypt(
-            nonce,
+            &nonce,
             chacha20poly1305::aead::Payload {
                 msg: &ct,
                 aad: aad.as_bytes(),
@@ -202,7 +203,7 @@ pub fn decrypt_string(password: impl Into<SecretString>, envelope: &str) -> Resu
         )
         .map_err(|_| anyhow!("decryption failed (wrong password or corrupted data)"))?;
 
-    nonce_bytes.zeroize();
+    nonce_arr.zeroize();
     ct.zeroize();
 
     let s = String::from_utf8(pt).context("plaintext not valid UTF-8")?;

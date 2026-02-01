@@ -1,8 +1,8 @@
 use crate::command::preview_command;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use clap_complete::CompletionCandidate;
 use futures::future::join_all;
-use gman::config::{Config, RunConfig, load_config};
+use gman::config::{load_config, Config, RunConfig};
 use log::{debug, error};
 use regex::Regex;
 use std::collections::HashMap;
