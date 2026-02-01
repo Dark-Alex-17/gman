@@ -321,6 +321,22 @@ impl LocalProvider {
 
     fn get_password(&self) -> Result<SecretString> {
         if let Some(password_file) = &self.password_file {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let metadata = fs::metadata(password_file).with_context(|| {
+                    format!("failed to read password file metadata {:?}", password_file)
+                })?;
+                let mode = metadata.permissions().mode();
+                if mode & 0o077 != 0 {
+                    bail!(
+                        "password file {:?} has insecure permissions {:o} (should be 0600 or 0400)",
+                        password_file,
+                        mode & 0o777
+                    );
+                }
+            }
+
             let password = SecretString::new(
                 fs::read_to_string(password_file)
                     .with_context(|| format!("failed to read password file {:?}", password_file))?
@@ -369,18 +385,35 @@ fn store_vault(path: &Path, map: &HashMap<String, String>) -> Result<()> {
         fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
     let s = serde_yaml::to_string(map).with_context(|| "serialize vault")?;
-    fs::write(path, s).with_context(|| format!("write {}", path.display()))
+    fs::write(path, &s).with_context(|| format!("write {}", path.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("set permissions on {}", path.display()))?;
+    }
+
+    Ok(())
 }
 
 fn encrypt_string(password: &SecretString, plaintext: &str) -> Result<String> {
+    if password.expose_secret().is_empty() {
+        bail!("password cannot be empty");
+    }
+
     let mut salt = [0u8; SALT_LEN];
     OsRng.fill_bytes(&mut salt);
     let mut nonce_bytes = [0u8; NONCE_LEN];
     OsRng.fill_bytes(&mut nonce_bytes);
 
-    let key = derive_key(password, &salt)?;
+    let mut key = derive_key(password, &salt)?;
     let cipher = XChaCha20Poly1305::new(&key);
-    let aad = format!("{};{}", HEADER, VERSION);
+
+    let aad = format!(
+        "{};{};{};m={},t={},p={}",
+        HEADER, VERSION, KDF, ARGON_M_COST_KIB, ARGON_T_COST, ARGON_P
+    );
 
     let nonce: XNonce = nonce_bytes.into();
     let mut pt = plaintext.as_bytes().to_vec();
@@ -409,6 +442,7 @@ fn encrypt_string(password: &SecretString, plaintext: &str) -> Result<String> {
     );
 
     drop(cipher);
+    key.zeroize();
     salt.zeroize();
     nonce_bytes.zeroize();
 
@@ -438,7 +472,21 @@ fn derive_key(password: &SecretString, salt: &[u8]) -> Result<Key> {
     derive_key_with_params(password, salt, ARGON_M_COST_KIB, ARGON_T_COST, ARGON_P)
 }
 
-fn decrypt_string(password: &SecretString, envelope: &str) -> Result<String> {
+/// Attempts to decrypt with the given cipher, nonce, ciphertext, and AAD.
+fn try_decrypt(
+    cipher: &XChaCha20Poly1305,
+    nonce: &XNonce,
+    ct: &[u8],
+    aad: &[u8],
+) -> std::result::Result<Vec<u8>, chacha20poly1305::aead::Error> {
+    cipher.decrypt(nonce, chacha20poly1305::aead::Payload { msg: ct, aad })
+}
+
+type EnvelopeComponents = (u32, u32, u32, Vec<u8>, [u8; NONCE_LEN], Vec<u8>);
+
+/// Parse an envelope string and extract its components.
+/// Returns (m, t, p, salt, nonce_arr, ct) on success.
+fn parse_envelope(envelope: &str) -> Result<EnvelopeComponents> {
     let parts: Vec<&str> = envelope.trim().split(';').collect();
     if parts.len() < 7 {
         debug!("Invalid envelope format: {:?}", parts);
@@ -480,41 +528,202 @@ fn decrypt_string(password: &SecretString, envelope: &str) -> Result<String> {
         .with_context(|| "missing nonce")?;
     let ct_b64 = parts[6].strip_prefix("ct=").with_context(|| "missing ct")?;
 
-    let mut salt = B64.decode(salt_b64).with_context(|| "bad salt b64")?;
+    let salt = B64.decode(salt_b64).with_context(|| "bad salt b64")?;
     let nonce_bytes = B64.decode(nonce_b64).with_context(|| "bad nonce b64")?;
-    let mut ct = B64.decode(ct_b64).with_context(|| "bad ct b64")?;
+    let ct = B64.decode(ct_b64).with_context(|| "bad ct b64")?;
 
-    if salt.len() != SALT_LEN || nonce_bytes.len() != NONCE_LEN {
-        debug!(
-            "Salt/nonce length mismatch: salt {}, nonce {}",
-            salt.len(),
-            nonce_bytes.len()
-        );
-        bail!("salt/nonce length mismatch");
+    if nonce_bytes.len() != NONCE_LEN {
+        debug!("Nonce length mismatch: {}", nonce_bytes.len());
+        bail!("nonce length mismatch");
     }
 
-    let key = derive_key_with_params(password, &salt, m, t, p)?;
-    let cipher = XChaCha20Poly1305::new(&key);
-    let aad = format!("{};{}", HEADER, VERSION);
-    let mut nonce_arr: [u8; NONCE_LEN] = nonce_bytes.try_into().map_err(|_| anyhow!("invalid nonce length"))?;
+    let nonce_arr: [u8; NONCE_LEN] = nonce_bytes
+        .try_into()
+        .map_err(|_| anyhow!("invalid nonce length"))?;
+
+    Ok((m, t, p, salt, nonce_arr, ct))
+}
+
+fn decrypt_string(password: &SecretString, envelope: &str) -> Result<String> {
+    if password.expose_secret().is_empty() {
+        bail!("password cannot be empty");
+    }
+
+    let (m, t, p, mut salt, mut nonce_arr, mut ct) = parse_envelope(envelope)?;
     let nonce: XNonce = nonce_arr.into();
 
-    let pt = cipher
-        .decrypt(
-            &nonce,
-            chacha20poly1305::aead::Payload {
-                msg: &ct,
-                aad: aad.as_bytes(),
-            },
-        )
-        .map_err(|_| anyhow!("decryption failed (wrong password or corrupted data)"))?;
+    let aad_current = format!("{};{};{};m={},t={},p={}", HEADER, VERSION, KDF, m, t, p);
 
+    let mut key = derive_key_with_params(password, &salt, m, t, p)?;
+    let cipher = XChaCha20Poly1305::new(&key);
+
+    if let Ok(pt) = try_decrypt(&cipher, &nonce, &ct, aad_current.as_bytes()) {
+        let s = String::from_utf8(pt.clone()).with_context(|| "plaintext not valid UTF-8")?;
+        key.zeroize();
+        salt.zeroize();
+        nonce_arr.zeroize();
+        ct.zeroize();
+        return Ok(s);
+    }
+
+    key.zeroize();
     salt.zeroize();
     nonce_arr.zeroize();
     ct.zeroize();
 
-    let s = String::from_utf8(pt).with_context(|| "plaintext not valid UTF-8")?;
-    Ok(s)
+    // TODO: Remove once all users have migrated their local vaults
+    if let Ok(plaintext) = legacy::decrypt_string_legacy(password, envelope) {
+        return Ok(plaintext);
+    }
+
+    bail!("decryption failed (wrong password or corrupted data)")
+}
+
+// TODO: Remove this entire module once all users have migrated their vaults.
+mod legacy {
+    use super::*;
+
+    fn legacy_aad() -> String {
+        format!("{};{}", HEADER, VERSION)
+    }
+
+    pub fn decrypt_string_legacy(password: &SecretString, envelope: &str) -> Result<String> {
+        if password.expose_secret().is_empty() {
+            bail!("password cannot be empty");
+        }
+
+        let (m, t, p, mut salt, mut nonce_arr, mut ct) = parse_envelope(envelope)?;
+        let nonce: XNonce = nonce_arr.into();
+        let aad = legacy_aad();
+
+        let mut key = derive_key_with_params(password, &salt, m, t, p)?;
+        let cipher = XChaCha20Poly1305::new(&key);
+
+        if let Ok(pt) = try_decrypt(&cipher, &nonce, &ct, aad.as_bytes()) {
+            let s = String::from_utf8(pt.clone()).with_context(|| "plaintext not valid UTF-8")?;
+            key.zeroize();
+            salt.zeroize();
+            nonce_arr.zeroize();
+            ct.zeroize();
+            return Ok(s);
+        }
+
+        key.zeroize();
+
+        let mut zeros_key: Key = [0u8; KEY_LEN].into();
+        let zeros_cipher = XChaCha20Poly1305::new(&zeros_key);
+
+        if let Ok(pt) = try_decrypt(&zeros_cipher, &nonce, &ct, aad.as_bytes()) {
+            debug!("Decrypted using legacy all-zeros key - secret needs migration");
+            let s = String::from_utf8(pt.clone()).with_context(|| "plaintext not valid UTF-8")?;
+            zeros_key.zeroize();
+            salt.zeroize();
+            nonce_arr.zeroize();
+            ct.zeroize();
+            return Ok(s);
+        }
+
+        zeros_key.zeroize();
+        salt.zeroize();
+        nonce_arr.zeroize();
+        ct.zeroize();
+
+        bail!("legacy decryption failed")
+    }
+
+    pub fn is_current_format(password: &SecretString, envelope: &str) -> Result<bool> {
+        if password.expose_secret().is_empty() {
+            bail!("password cannot be empty");
+        }
+
+        let (m, t, p, salt, nonce_arr, ct) = parse_envelope(envelope)?;
+        let nonce: XNonce = nonce_arr.into();
+
+        let aad_current = format!("{};{};{};m={},t={},p={}", HEADER, VERSION, KDF, m, t, p);
+        let key = derive_key_with_params(password, &salt, m, t, p)?;
+        let cipher = XChaCha20Poly1305::new(&key);
+
+        Ok(try_decrypt(&cipher, &nonce, &ct, aad_current.as_bytes()).is_ok())
+    }
+}
+
+// TODO: Remove once all users have migrated their local vaults
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SecretStatus {
+    Current,
+    NeedsMigration,
+}
+
+// TODO: Remove once all users have migrated their local vaults
+#[derive(Debug)]
+pub struct MigrationResult {
+    pub total: usize,
+    pub migrated: usize,
+    pub already_current: usize,
+    pub failed: Vec<(String, String)>,
+}
+
+impl LocalProvider {
+    // TODO: Remove once all users have migrated their local vaults
+    pub async fn migrate_vault(&self) -> Result<MigrationResult> {
+        let vault_path = self.active_vault_path()?;
+        let vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
+
+        if vault.is_empty() {
+            return Ok(MigrationResult {
+                total: 0,
+                migrated: 0,
+                already_current: 0,
+                failed: vec![],
+            });
+        }
+
+        let password = self.get_password()?;
+        let mut migrated_vault = HashMap::new();
+        let mut migrated_count = 0;
+        let mut already_current_count = 0;
+        let mut failed = vec![];
+
+        for (key, envelope) in &vault {
+            match legacy::is_current_format(&password, envelope) {
+                Ok(true) => {
+                    migrated_vault.insert(key.clone(), envelope.clone());
+                    already_current_count += 1;
+                }
+                Ok(false) => match decrypt_string(&password, envelope) {
+                    Ok(plaintext) => match encrypt_string(&password, &plaintext) {
+                        Ok(new_envelope) => {
+                            migrated_vault.insert(key.clone(), new_envelope);
+                            migrated_count += 1;
+                        }
+                        Err(e) => {
+                            failed.push((key.clone(), format!("re-encryption failed: {}", e)));
+                            migrated_vault.insert(key.clone(), envelope.clone());
+                        }
+                    },
+                    Err(e) => {
+                        failed.push((key.clone(), format!("decryption failed: {}", e)));
+                        migrated_vault.insert(key.clone(), envelope.clone());
+                    }
+                },
+                Err(e) => {
+                    failed.push((key.clone(), format!("status check failed: {}", e)));
+                    migrated_vault.insert(key.clone(), envelope.clone());
+                }
+            }
+        }
+
+        if migrated_count > 0 {
+            store_vault(&vault_path, &migrated_vault)?;
+        }
+
+        Ok(MigrationResult {
+            total: vault.len(),
+            migrated: migrated_count,
+            already_current: already_current_count,
+            failed,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -530,7 +739,7 @@ mod tests {
         let password = SecretString::new("test_password".to_string().into());
         let salt = [0u8; 16];
         let key = derive_key(&password, &salt).unwrap();
-        assert_eq!(key.as_slice().len(), 32);
+        assert_eq!(key.len(), 32);
     }
 
     #[test]
@@ -538,7 +747,7 @@ mod tests {
         let password = SecretString::new("test_password".to_string().into());
         let salt = [0u8; 16];
         let key = derive_key_with_params(&password, &salt, 10, 1, 1).unwrap();
-        assert_eq!(key.as_slice().len(), 32);
+        assert_eq!(key.len(), 32);
     }
 
     #[test]
@@ -551,6 +760,40 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn get_password_reads_password_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("pw.txt");
+        fs::write(&file, "secretpw\n").unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+        let provider = LocalProvider {
+            password_file: Some(file),
+            runtime_provider_name: None,
+            ..LocalProvider::default()
+        };
+        let pw = provider.get_password().unwrap();
+        assert_eq!(pw.expose_secret(), "secretpw");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn get_password_rejects_insecure_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("pw.txt");
+        fs::write(&file, "secretpw\n").unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+        let provider = LocalProvider {
+            password_file: Some(file),
+            runtime_provider_name: None,
+            ..LocalProvider::default()
+        };
+        assert!(provider.get_password().is_err());
+    }
+
+    #[test]
+    #[cfg(not(unix))]
     fn get_password_reads_password_file() {
         let dir = tempdir().unwrap();
         let file = dir.path().join("pw.txt");

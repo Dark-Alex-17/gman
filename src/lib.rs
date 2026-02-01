@@ -22,10 +22,7 @@
 //! filesystem. Prefer `no_run` doctests for those.
 
 use anyhow::{Context, Result, anyhow, bail};
-use argon2::{
-    Algorithm, Argon2, Params, Version,
-    password_hash::{SaltString, rand_core::RngCore},
-};
+use argon2::{Algorithm, Argon2, Params, Version, password_hash::rand_core::RngCore};
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use chacha20poly1305::{
     Key, XChaCha20Poly1305, XNonce,
@@ -43,8 +40,8 @@ pub(crate) const HEADER: &str = "$VAULT";
 pub(crate) const VERSION: &str = "v1";
 pub(crate) const KDF: &str = "argon2id";
 
-pub(crate) const ARGON_M_COST_KIB: u32 = 19_456;
-pub(crate) const ARGON_T_COST: u32 = 2;
+pub(crate) const ARGON_M_COST_KIB: u32 = 65_536;
+pub(crate) const ARGON_T_COST: u32 = 3;
 pub(crate) const ARGON_P: u32 = 1;
 
 pub(crate) const SALT_LEN: usize = 16;
@@ -84,14 +81,22 @@ fn derive_key(password: &SecretString, salt: &[u8]) -> Result<Key> {
 pub fn encrypt_string(password: impl Into<SecretString>, plaintext: &str) -> Result<String> {
     let password = password.into();
 
-    let salt = SaltString::generate(&mut OsRng);
+    if password.expose_secret().is_empty() {
+        bail!("password cannot be empty");
+    }
+
+    let mut salt = [0u8; SALT_LEN];
+    OsRng.fill_bytes(&mut salt);
     let mut nonce_bytes = [0u8; NONCE_LEN];
     OsRng.fill_bytes(&mut nonce_bytes);
 
-    let key = derive_key(&password, salt.as_str().as_bytes())?;
+    let mut key = derive_key(&password, &salt)?;
     let cipher = XChaCha20Poly1305::new(&key);
 
-    let aad = format!("{};{}", HEADER, VERSION);
+    let aad = format!(
+        "{};{};{};m={},t={},p={}",
+        HEADER, VERSION, KDF, ARGON_M_COST_KIB, ARGON_T_COST, ARGON_P
+    );
 
     let nonce: XNonce = nonce_bytes.into();
     let mut pt = plaintext.as_bytes().to_vec();
@@ -115,13 +120,14 @@ pub fn encrypt_string(password: impl Into<SecretString>, plaintext: &str) -> Res
         m = ARGON_M_COST_KIB,
         t = ARGON_T_COST,
         p = ARGON_P,
-        salt = B64.encode(salt.as_str().as_bytes()),
+        salt = B64.encode(salt),
         nonce = B64.encode(nonce_bytes),
         ct = B64.encode(&ct),
     );
 
     drop(cipher);
-    let _ = key;
+    key.zeroize();
+    salt.zeroize();
     nonce_bytes.zeroize();
 
     Ok(env)
@@ -131,6 +137,9 @@ pub fn encrypt_string(password: impl Into<SecretString>, plaintext: &str) -> Res
 ///
 /// Returns the original plaintext on success or an error if the password is
 /// wrong, the envelope was tampered with, or the input is malformed.
+///
+/// This function supports both the current format (with KDF params in AAD) and
+/// the legacy format (without KDF params in AAD) for backwards compatibility.
 ///
 /// Example
 /// ```
@@ -144,6 +153,10 @@ pub fn encrypt_string(password: impl Into<SecretString>, plaintext: &str) -> Res
 /// ```
 pub fn decrypt_string(password: impl Into<SecretString>, envelope: &str) -> Result<String> {
     let password = password.into();
+
+    if password.expose_secret().is_empty() {
+        bail!("password cannot be empty");
+    }
 
     let parts: Vec<&str> = envelope.split(';').collect();
     if parts.len() < 7 {
@@ -178,7 +191,7 @@ pub fn decrypt_string(password: impl Into<SecretString>, envelope: &str) -> Resu
     let nonce_b64 = parts[5].strip_prefix("nonce=").context("missing nonce")?;
     let ct_b64 = parts[6].strip_prefix("ct=").context("missing ct")?;
 
-    let salt_bytes = B64.decode(salt_b64).context("bad salt b64")?;
+    let mut salt_bytes = B64.decode(salt_b64).context("bad salt b64")?;
     let nonce_bytes = B64.decode(nonce_b64).context("bad nonce b64")?;
     let mut ct = B64.decode(ct_b64).context("bad ct b64")?;
 
@@ -186,27 +199,47 @@ pub fn decrypt_string(password: impl Into<SecretString>, envelope: &str) -> Resu
         bail!("nonce length mismatch");
     }
 
-    let key = derive_key(&password, &salt_bytes)?;
+    let mut key = derive_key(&password, &salt_bytes)?;
 
     let cipher = XChaCha20Poly1305::new(&key);
 
-    let aad = format!("{};{}", HEADER, VERSION);
-    let mut nonce_arr: [u8; NONCE_LEN] = nonce_bytes.try_into().map_err(|_| anyhow!("invalid nonce length"))?;
-    let nonce: XNonce = nonce_arr.into();
-    let pt = cipher
-        .decrypt(
-            &nonce,
-            chacha20poly1305::aead::Payload {
-                msg: &ct,
-                aad: aad.as_bytes(),
-            },
-        )
-        .map_err(|_| anyhow!("decryption failed (wrong password or corrupted data)"))?;
+    let aad_new = format!("{};{};{};m={},t={},p={}", HEADER, VERSION, KDF, m, t, p);
+    let aad_legacy = format!("{};{}", HEADER, VERSION);
 
+    let mut nonce_arr: [u8; NONCE_LEN] = nonce_bytes
+        .try_into()
+        .map_err(|_| anyhow!("invalid nonce length"))?;
+    let nonce: XNonce = nonce_arr.into();
+
+    let decrypt_result = cipher.decrypt(
+        &nonce,
+        chacha20poly1305::aead::Payload {
+            msg: &ct,
+            aad: aad_new.as_bytes(),
+        },
+    );
+
+    let mut pt = match decrypt_result {
+        Ok(pt) => pt,
+        Err(_) => cipher
+            .decrypt(
+                &nonce,
+                chacha20poly1305::aead::Payload {
+                    msg: &ct,
+                    aad: aad_legacy.as_bytes(),
+                },
+            )
+            .map_err(|_| anyhow!("decryption failed (wrong password or corrupted data)"))?,
+    };
+
+    let s = String::from_utf8(pt.clone()).context("plaintext not valid UTF-8")?;
+
+    key.zeroize();
+    salt_bytes.zeroize();
     nonce_arr.zeroize();
     ct.zeroize();
+    pt.zeroize();
 
-    let s = String::from_utf8(pt).context("plaintext not valid UTF-8")?;
     Ok(s)
 }
 
@@ -248,12 +281,10 @@ mod tests {
     }
 
     #[test]
-    fn empty_password() {
+    fn empty_password_rejected() {
         let pw = SecretString::new("".into());
         let msg = "hello";
-        let env = encrypt_string(pw.clone(), msg).unwrap();
-        let out = decrypt_string(pw, &env).unwrap();
-        assert_eq!(msg, out);
+        assert!(encrypt_string(pw.clone(), msg).is_err());
     }
 
     #[test]
@@ -275,7 +306,7 @@ mod tests {
         let mut ct = base64::engine::general_purpose::STANDARD
             .decode(ct_b64)
             .unwrap();
-        ct[0] ^= 0x01; // Flip a bit
+        ct[0] ^= 0x01;
         let new_ct_b64 = base64::engine::general_purpose::STANDARD.encode(&ct);
         let new_ct_part = format!("ct={}", new_ct_b64);
         parts[6] = &new_ct_part;

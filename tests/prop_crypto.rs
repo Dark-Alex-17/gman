@@ -9,7 +9,7 @@ use secrecy::SecretString;
 
 proptest! {
     #[test]
-    fn prop_encrypt_decrypt_roundtrip(password in ".{0,64}", msg in ".{0,512}") {
+    fn prop_encrypt_decrypt_roundtrip(password in ".{1,64}", msg in ".{0,512}") {
         let pw = SecretString::new(password.into());
         let env = encrypt_string(pw.clone(), &msg).unwrap();
         let out = decrypt_string(pw, &env).unwrap();
@@ -18,10 +18,9 @@ proptest! {
     }
 
     #[test]
-    fn prop_tamper_ciphertext_detected(password in ".{0,32}", msg in ".{1,128}") {
+    fn prop_tamper_ciphertext_detected(password in ".{1,32}", msg in ".{1,128}") {
         let pw = SecretString::new(password.into());
         let env = encrypt_string(pw.clone(), &msg).unwrap();
-        // Flip a bit in the ct payload segment
         let mut parts: Vec<&str> = env.split(';').collect();
         let ct_b64 = parts[6].strip_prefix("ct=").unwrap();
         let mut ct = base64::engine::general_purpose::STANDARD.decode(ct_b64).unwrap();

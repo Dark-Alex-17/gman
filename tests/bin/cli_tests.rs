@@ -46,9 +46,16 @@ providers:
             password_file.display()
         )
     };
-    // Confy with yaml feature typically uses .yml; write both to be safe.
     fs::write(app_dir.join("config.yml"), &cfg).unwrap();
     fs::write(app_dir.join("config.yaml"), &cfg).unwrap();
+}
+
+fn create_password_file(path: &Path, content: &[u8]) {
+    fs::write(path, content).unwrap();
+    #[cfg(unix)]
+    {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
 }
 
 #[test]
@@ -56,10 +63,9 @@ providers:
 fn cli_config_no_changes() {
     let (td, xdg_cfg, xdg_cache) = setup_env();
     let pw_file = td.path().join("pw.txt");
-    fs::write(&pw_file, b"pw\n").unwrap();
+    create_password_file(&pw_file, b"pw\n");
     write_yaml_config(&xdg_cfg, &pw_file, None);
 
-    // Create a no-op editor script that exits successfully without modifying the file
     let editor = td.path().join("noop-editor.sh");
     fs::write(&editor, b"#!/bin/sh\nexit 0\n").unwrap();
     let mut perms = fs::metadata(&editor).unwrap().permissions();
@@ -82,10 +88,9 @@ fn cli_config_no_changes() {
 fn cli_config_updates_and_persists() {
     let (td, xdg_cfg, xdg_cache) = setup_env();
     let pw_file = td.path().join("pw.txt");
-    fs::write(&pw_file, b"pw\n").unwrap();
+    create_password_file(&pw_file, b"pw\n");
     write_yaml_config(&xdg_cfg, &pw_file, None);
 
-    // Editor script appends a valid run_configs section to the YAML file
     let editor = td.path().join("append-run-config.sh");
     let script = r#"#!/bin/sh
 FILE="$1"
@@ -111,7 +116,6 @@ exit 0
         "Configuration updated successfully",
     ));
 
-    // Verify that the config file now contains the run_configs key
     let cfg_path = xdg_cfg.join("gman").join("config.yml");
     let written = fs::read_to_string(&cfg_path).expect("config file readable");
     assert!(written.contains("run_configs:"));
@@ -134,10 +138,9 @@ fn cli_shows_help() {
 fn cli_add_get_list_update_delete_roundtrip() {
     let (td, xdg_cfg, xdg_cache) = setup_env();
     let pw_file = td.path().join("pw.txt");
-    fs::write(&pw_file, b"testpw\n").unwrap();
+    create_password_file(&pw_file, b"testpw\n");
     write_yaml_config(&xdg_cfg, &pw_file, None);
 
-    // add
     let mut add = Command::cargo_bin("gman").unwrap();
     add.env("XDG_CONFIG_HOME", &xdg_cfg)
         .env("XDG_CACHE_HOME", &xdg_cache)
@@ -154,7 +157,6 @@ fn cli_add_get_list_update_delete_roundtrip() {
     let add_out = child.wait_with_output().unwrap();
     assert!(add_out.status.success());
 
-    // get (text)
     let mut get = Command::cargo_bin("gman").unwrap();
     get.env("XDG_CONFIG_HOME", &xdg_cfg)
         .env("XDG_CACHE_HOME", &xdg_cache)
@@ -163,7 +165,6 @@ fn cli_add_get_list_update_delete_roundtrip() {
         .success()
         .stdout(predicate::str::contains("super_secret"));
 
-    // get as JSON
     let mut get_json = Command::cargo_bin("gman").unwrap();
     get_json
         .env("XDG_CONFIG_HOME", &xdg_cfg)
@@ -173,7 +174,6 @@ fn cli_add_get_list_update_delete_roundtrip() {
         predicate::str::contains("my_api_key").and(predicate::str::contains("super_secret")),
     );
 
-    // list
     let mut list = Command::cargo_bin("gman").unwrap();
     list.env("XDG_CONFIG_HOME", &xdg_cfg)
         .env("XDG_CACHE_HOME", &xdg_cache)
@@ -182,7 +182,6 @@ fn cli_add_get_list_update_delete_roundtrip() {
         .success()
         .stdout(predicate::str::contains("my_api_key"));
 
-    // update
     let mut update = Command::cargo_bin("gman").unwrap();
     update
         .env("XDG_CONFIG_HOME", &xdg_cfg)
@@ -199,7 +198,6 @@ fn cli_add_get_list_update_delete_roundtrip() {
     let upd_out = child.wait_with_output().unwrap();
     assert!(upd_out.status.success());
 
-    // get again
     let mut get2 = Command::cargo_bin("gman").unwrap();
     get2.env("XDG_CONFIG_HOME", &xdg_cfg)
         .env("XDG_CACHE_HOME", &xdg_cache)
@@ -208,14 +206,12 @@ fn cli_add_get_list_update_delete_roundtrip() {
         .success()
         .stdout(predicate::str::contains("new_val"));
 
-    // delete
     let mut del = Command::cargo_bin("gman").unwrap();
     del.env("XDG_CONFIG_HOME", &xdg_cfg)
         .env("XDG_CACHE_HOME", &xdg_cache)
         .args(["delete", "my_api_key"]);
     del.assert().success();
 
-    // get should now fail
     let mut get_missing = Command::cargo_bin("gman").unwrap();
     get_missing
         .env("XDG_CONFIG_HOME", &xdg_cfg)
@@ -228,10 +224,9 @@ fn cli_add_get_list_update_delete_roundtrip() {
 fn cli_wrap_dry_run_env_injection() {
     let (td, xdg_cfg, xdg_cache) = setup_env();
     let pw_file = td.path().join("pw.txt");
-    fs::write(&pw_file, b"pw\n").unwrap();
+    create_password_file(&pw_file, b"pw\n");
     write_yaml_config(&xdg_cfg, &pw_file, Some("echo"));
 
-    // Add the secret so the profile can read it
     let mut add = Command::cargo_bin("gman").unwrap();
     add.env("XDG_CONFIG_HOME", &xdg_cfg)
         .env("XDG_CACHE_HOME", &xdg_cache)
@@ -243,7 +238,6 @@ fn cli_wrap_dry_run_env_injection() {
     let add_out = child.wait_with_output().unwrap();
     assert!(add_out.status.success());
 
-    // Dry-run wrapping: prints preview command
     let mut wrap = Command::cargo_bin("gman").unwrap();
     wrap.env("XDG_CONFIG_HOME", &xdg_cfg)
         .env("XDG_CACHE_HOME", &xdg_cache)

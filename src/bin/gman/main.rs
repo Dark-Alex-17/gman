@@ -4,12 +4,12 @@ use crate::cli::secrets_completer;
 use anyhow::{Context, Result};
 use clap::Subcommand;
 use clap::{
-    crate_authors, crate_description, crate_name, crate_version, CommandFactory, Parser, ValueEnum,
+    CommandFactory, Parser, ValueEnum, crate_authors, crate_description, crate_name, crate_version,
 };
 use clap_complete::{ArgValueCompleter, CompleteEnv};
 use crossterm::execute;
-use crossterm::terminal::{disable_raw_mode, LeaveAlternateScreen};
-use gman::config::{get_config_file_path, load_config, Config};
+use crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
+use gman::config::{Config, get_config_file_path, load_config};
 use std::ffi::OsString;
 use std::io::{self, IsTerminal, Read, Write};
 use std::panic::PanicHookInfo;
@@ -115,6 +115,12 @@ enum Commands {
 
     /// Sync secrets with remote storage (if supported by the provider)
     Sync {},
+
+    // TODO: Remove once all users have migrated their local vaults
+    /// Migrate local vault secrets to the current secure encryption format.
+    /// This is only needed if you have secrets encrypted with older versions of gman.
+    /// Only works with the local provider.
+    Migrate {},
 
     /// Open and edit the config file in the default text editor
     Config {},
@@ -257,6 +263,49 @@ async fn main() -> Result<()> {
                     println!("✓ Secrets synchronized with remote")
                 }
             })?;
+        }
+        // TODO: Remove once all users have migrated their local vaults
+        Commands::Migrate {} => {
+            use gman::providers::SupportedProvider;
+            use gman::providers::local::LocalProvider;
+
+            let provider_config_for_migrate =
+                config.extract_provider_config(cli.provider.clone())?;
+
+            let local_provider: LocalProvider = match provider_config_for_migrate.provider_type {
+                SupportedProvider::Local { provider_def } => provider_def,
+                _ => {
+                    anyhow::bail!("The migrate command only works with the local provider.");
+                }
+            };
+
+            println!("Migrating vault secrets to current secure format...");
+            let result = local_provider.migrate_vault().await?;
+
+            if result.total == 0 {
+                println!("Vault is empty, nothing to migrate.");
+            } else {
+                println!(
+                    "Migration complete: {} total, {} migrated, {} already current",
+                    result.total, result.migrated, result.already_current
+                );
+
+                if !result.failed.is_empty() {
+                    eprintln!("\n⚠ Failed to migrate {} secret(s):", result.failed.len());
+                    for (key, error) in &result.failed {
+                        eprintln!("  - {}: {}", key, error);
+                    }
+                }
+
+                if result.migrated > 0 {
+                    println!(
+                        "\n✓ Successfully migrated {} secret(s) to the secure format.",
+                        result.migrated
+                    );
+                } else if result.failed.is_empty() {
+                    println!("\n✓ All secrets are already using the current secure format.");
+                }
+            }
         }
         Commands::External(tokens) => {
             wrap_and_run_command(cli.provider, &config, tokens, cli.profile, cli.dry_run).await?;
