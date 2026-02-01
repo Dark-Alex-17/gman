@@ -4,12 +4,12 @@ use crate::cli::secrets_completer;
 use anyhow::{Context, Result};
 use clap::Subcommand;
 use clap::{
-    CommandFactory, Parser, ValueEnum, crate_authors, crate_description, crate_name, crate_version,
+    crate_authors, crate_description, crate_name, crate_version, CommandFactory, Parser, ValueEnum,
 };
 use clap_complete::{ArgValueCompleter, CompleteEnv};
 use crossterm::execute;
-use crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
-use gman::config::{Config, get_config_file_path, load_config};
+use crossterm::terminal::{disable_raw_mode, LeaveAlternateScreen};
+use gman::config::{get_config_file_path, load_config, Config};
 use std::ffi::OsString;
 use std::io::{self, IsTerminal, Read, Write};
 use std::panic::PanicHookInfo;
@@ -159,7 +159,7 @@ async fn main() -> Result<()> {
             let plaintext =
                 read_all_stdin().with_context(|| "unable to read plaintext from stdin")?;
             secrets_provider
-                .set_secret(&name, plaintext.trim_end())
+                .set_secret(&name, &plaintext)
                 .await
                 .map(|_| match cli.output {
                     Some(_) => (),
@@ -190,7 +190,7 @@ async fn main() -> Result<()> {
             let plaintext =
                 read_all_stdin().with_context(|| "unable to read plaintext from stdin")?;
             secrets_provider
-                .update_secret(&name, plaintext.trim_end())
+                .update_secret(&name, &plaintext)
                 .await
                 .map(|_| match cli.output {
                     Some(_) => (),
