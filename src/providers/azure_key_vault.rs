@@ -1,11 +1,13 @@
 use crate::providers::SecretProvider;
 use anyhow::{Context, Result};
-use azure_identity::DefaultAzureCredential;
+use azure_core::credentials::TokenCredential;
+use azure_identity::DeveloperToolsCredential;
 use azure_security_keyvault_secrets::models::SetSecretParameters;
 use azure_security_keyvault_secrets::{ResourceExt, SecretClient};
 use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
+use std::sync::Arc;
 use validator::Validate;
 
 #[skip_serializing_none]
@@ -40,12 +42,8 @@ impl SecretProvider for AzureKeyVaultProvider {
     }
 
     async fn get_secret(&self, key: &str) -> Result<String> {
-        let body = self
-            .get_client()?
-            .get_secret(key, "", None)
-            .await?
-            .into_body()
-            .await?;
+        let response = self.get_client()?.get_secret(key, None).await?;
+        let body = response.into_model()?;
 
         body.value
             .with_context(|| format!("Secret '{}' not found", key))
@@ -60,8 +58,7 @@ impl SecretProvider for AzureKeyVaultProvider {
         self.get_client()?
             .set_secret(key, params.try_into()?, None)
             .await?
-            .into_body()
-            .await?;
+            .into_model()?;
 
         Ok(())
     }
@@ -77,10 +74,7 @@ impl SecretProvider for AzureKeyVaultProvider {
     }
 
     async fn list_secrets(&self) -> Result<Vec<String>> {
-        let mut pager = self
-            .get_client()?
-            .list_secret_properties(None)?
-            .into_stream();
+        let mut pager = self.get_client()?.list_secret_properties(None)?;
         let mut secrets = Vec::new();
         while let Some(props) = pager.try_next().await? {
             let name = props.resource_id()?.name;
@@ -93,7 +87,7 @@ impl SecretProvider for AzureKeyVaultProvider {
 
 impl AzureKeyVaultProvider {
     fn get_client(&self) -> Result<SecretClient> {
-        let credential = DefaultAzureCredential::new()?;
+        let credential: Arc<dyn TokenCredential> = DeveloperToolsCredential::new(None)?;
         let client = SecretClient::new(
             format!(
                 "https://{}.vault.azure.net",
