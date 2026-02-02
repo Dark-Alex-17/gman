@@ -1,3 +1,8 @@
+//! CLI integration tests that execute the gman binary.
+//!
+//! These tests are skipped when cross-compiling because the compiled binary
+//! cannot be executed on a different architecture (e.g., ARM64 binary on x86_64 host).
+
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
 use std::fs;
@@ -9,6 +14,16 @@ use tempfile::TempDir;
 
 fn gman_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_gman"))
+}
+
+/// Check if the gman binary can be executed on this system.
+/// Returns false when cross-compiling (e.g., ARM64 binary on x86_64 host).
+fn can_execute_binary() -> bool {
+    Command::new(gman_bin())
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 fn setup_env() -> (TempDir, PathBuf, PathBuf) {
@@ -65,6 +80,11 @@ fn create_password_file(path: &Path, content: &[u8]) {
 #[test]
 #[cfg(unix)]
 fn cli_config_no_changes() {
+    if !can_execute_binary() {
+        eprintln!("Skipping test: cannot execute cross-compiled binary");
+        return;
+    }
+
     let (td, xdg_cfg, xdg_cache) = setup_env();
     let pw_file = td.path().join("pw.txt");
     create_password_file(&pw_file, b"pw\n");
@@ -90,6 +110,11 @@ fn cli_config_no_changes() {
 #[test]
 #[cfg(unix)]
 fn cli_config_updates_and_persists() {
+    if !can_execute_binary() {
+        eprintln!("Skipping test: cannot execute cross-compiled binary");
+        return;
+    }
+
     let (td, xdg_cfg, xdg_cache) = setup_env();
     let pw_file = td.path().join("pw.txt");
     create_password_file(&pw_file, b"pw\n");
@@ -132,6 +157,11 @@ exit 0
 
 #[test]
 fn cli_shows_help() {
+    if !can_execute_binary() {
+        eprintln!("Skipping test: cannot execute cross-compiled binary");
+        return;
+    }
+
     let (_td, cfg, cache) = setup_env();
     let mut cmd = Command::new(gman_bin());
     cmd.env("XDG_CACHE_HOME", &cache)
@@ -144,6 +174,11 @@ fn cli_shows_help() {
 
 #[test]
 fn cli_add_get_list_update_delete_roundtrip() {
+    if !can_execute_binary() {
+        eprintln!("Skipping test: cannot execute cross-compiled binary");
+        return;
+    }
+
     let (td, xdg_cfg, xdg_cache) = setup_env();
     let pw_file = td.path().join("pw.txt");
     create_password_file(&pw_file, b"testpw\n");
@@ -230,6 +265,11 @@ fn cli_add_get_list_update_delete_roundtrip() {
 
 #[test]
 fn cli_wrap_dry_run_env_injection() {
+    if !can_execute_binary() {
+        eprintln!("Skipping test: cannot execute cross-compiled binary");
+        return;
+    }
+
     let (td, xdg_cfg, xdg_cache) = setup_env();
     let pw_file = td.path().join("pw.txt");
     create_password_file(&pw_file, b"pw\n");
