@@ -7,6 +7,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use tempfile::TempDir;
 
+fn gman_bin() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_gman"))
+}
+
 fn setup_env() -> (TempDir, PathBuf, PathBuf) {
     let td = tempfile::tempdir().expect("tempdir");
     let cfg_home = td.path().join("config");
@@ -72,7 +76,7 @@ fn cli_config_no_changes() {
     perms.set_mode(0o755);
     fs::set_permissions(&editor, perms).unwrap();
 
-    let mut cmd = Command::cargo_bin("gman").unwrap();
+    let mut cmd = Command::new(gman_bin());
     cmd.env("XDG_CONFIG_HOME", &xdg_cfg)
         .env("XDG_CACHE_HOME", &xdg_cache)
         .env("EDITOR", &editor)
@@ -92,8 +96,12 @@ fn cli_config_updates_and_persists() {
     write_yaml_config(&xdg_cfg, &pw_file, None);
 
     let editor = td.path().join("append-run-config.sh");
+    // Note: We need a small sleep to ensure the file modification timestamp changes.
+    // The dialoguer Editor uses file modification time to detect changes, and on fast
+    // systems the edit can complete within the same timestamp granularity.
     let script = r#"#!/bin/sh
 FILE="$1"
+sleep 0.1
 cat >> "$FILE" <<'EOF'
 run_configs:
   - name: echo
@@ -106,7 +114,7 @@ exit 0
     perms.set_mode(0o755);
     fs::set_permissions(&editor, perms).unwrap();
 
-    let mut cmd = Command::cargo_bin("gman").unwrap();
+    let mut cmd = Command::new(gman_bin());
     cmd.env("XDG_CONFIG_HOME", &xdg_cfg)
         .env("XDG_CACHE_HOME", &xdg_cache)
         .env("EDITOR", &editor)
@@ -125,7 +133,7 @@ exit 0
 #[test]
 fn cli_shows_help() {
     let (_td, cfg, cache) = setup_env();
-    let mut cmd = Command::cargo_bin("gman").unwrap();
+    let mut cmd = Command::new(gman_bin());
     cmd.env("XDG_CACHE_HOME", &cache)
         .env("XDG_CONFIG_HOME", &cfg)
         .arg("--help");
@@ -141,7 +149,7 @@ fn cli_add_get_list_update_delete_roundtrip() {
     create_password_file(&pw_file, b"testpw\n");
     write_yaml_config(&xdg_cfg, &pw_file, None);
 
-    let mut add = Command::cargo_bin("gman").unwrap();
+    let mut add = Command::new(gman_bin());
     add.env("XDG_CONFIG_HOME", &xdg_cfg)
         .env("XDG_CACHE_HOME", &xdg_cache)
         .stdin(Stdio::piped())
@@ -157,7 +165,7 @@ fn cli_add_get_list_update_delete_roundtrip() {
     let add_out = child.wait_with_output().unwrap();
     assert!(add_out.status.success());
 
-    let mut get = Command::cargo_bin("gman").unwrap();
+    let mut get = Command::new(gman_bin());
     get.env("XDG_CONFIG_HOME", &xdg_cfg)
         .env("XDG_CACHE_HOME", &xdg_cache)
         .args(["get", "my_api_key"]);
@@ -165,7 +173,7 @@ fn cli_add_get_list_update_delete_roundtrip() {
         .success()
         .stdout(predicate::str::contains("super_secret"));
 
-    let mut get_json = Command::cargo_bin("gman").unwrap();
+    let mut get_json = Command::new(gman_bin());
     get_json
         .env("XDG_CONFIG_HOME", &xdg_cfg)
         .env("XDG_CACHE_HOME", &xdg_cache)
@@ -174,7 +182,7 @@ fn cli_add_get_list_update_delete_roundtrip() {
         predicate::str::contains("my_api_key").and(predicate::str::contains("super_secret")),
     );
 
-    let mut list = Command::cargo_bin("gman").unwrap();
+    let mut list = Command::new(gman_bin());
     list.env("XDG_CONFIG_HOME", &xdg_cfg)
         .env("XDG_CACHE_HOME", &xdg_cache)
         .arg("list");
@@ -182,7 +190,7 @@ fn cli_add_get_list_update_delete_roundtrip() {
         .success()
         .stdout(predicate::str::contains("my_api_key"));
 
-    let mut update = Command::cargo_bin("gman").unwrap();
+    let mut update = Command::new(gman_bin());
     update
         .env("XDG_CONFIG_HOME", &xdg_cfg)
         .env("XDG_CACHE_HOME", &xdg_cache)
@@ -198,7 +206,7 @@ fn cli_add_get_list_update_delete_roundtrip() {
     let upd_out = child.wait_with_output().unwrap();
     assert!(upd_out.status.success());
 
-    let mut get2 = Command::cargo_bin("gman").unwrap();
+    let mut get2 = Command::new(gman_bin());
     get2.env("XDG_CONFIG_HOME", &xdg_cfg)
         .env("XDG_CACHE_HOME", &xdg_cache)
         .args(["get", "my_api_key"]);
@@ -206,13 +214,13 @@ fn cli_add_get_list_update_delete_roundtrip() {
         .success()
         .stdout(predicate::str::contains("new_val"));
 
-    let mut del = Command::cargo_bin("gman").unwrap();
+    let mut del = Command::new(gman_bin());
     del.env("XDG_CONFIG_HOME", &xdg_cfg)
         .env("XDG_CACHE_HOME", &xdg_cache)
         .args(["delete", "my_api_key"]);
     del.assert().success();
 
-    let mut get_missing = Command::cargo_bin("gman").unwrap();
+    let mut get_missing = Command::new(gman_bin());
     get_missing
         .env("XDG_CONFIG_HOME", &xdg_cfg)
         .env("XDG_CACHE_HOME", &xdg_cache)
@@ -227,7 +235,7 @@ fn cli_wrap_dry_run_env_injection() {
     create_password_file(&pw_file, b"pw\n");
     write_yaml_config(&xdg_cfg, &pw_file, Some("echo"));
 
-    let mut add = Command::cargo_bin("gman").unwrap();
+    let mut add = Command::new(gman_bin());
     add.env("XDG_CONFIG_HOME", &xdg_cfg)
         .env("XDG_CACHE_HOME", &xdg_cache)
         .stdin(Stdio::piped())
@@ -238,7 +246,7 @@ fn cli_wrap_dry_run_env_injection() {
     let add_out = child.wait_with_output().unwrap();
     assert!(add_out.status.success());
 
-    let mut wrap = Command::cargo_bin("gman").unwrap();
+    let mut wrap = Command::new(gman_bin());
     wrap.env("XDG_CONFIG_HOME", &xdg_cfg)
         .env("XDG_CACHE_HOME", &xdg_cache)
         .arg("--dry-run")

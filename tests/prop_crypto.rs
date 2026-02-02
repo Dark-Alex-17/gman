@@ -1,13 +1,13 @@
 use base64::Engine;
 use gman::{decrypt_string, encrypt_string};
 use proptest::prelude::*;
-
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(64))]
-}
 use secrecy::SecretString;
 
 proptest! {
+    // Reduced case count because Argon2 key derivation is intentionally slow
+    // (65 MiB memory, 3 iterations per encryption/decryption)
+    #![proptest_config(ProptestConfig::with_cases(4))]
+
     #[test]
     fn prop_encrypt_decrypt_roundtrip(password in ".{1,64}", msg in ".{0,512}") {
         let pw = SecretString::new(password.into());
