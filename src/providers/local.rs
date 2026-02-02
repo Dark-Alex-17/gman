@@ -158,7 +158,8 @@ impl SecretProvider for LocalProvider {
     async fn list_secrets(&self) -> Result<Vec<String>> {
         let vault_path = self.active_vault_path()?;
         let vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
-        let keys: Vec<String> = vault.keys().cloned().collect();
+        let mut keys: Vec<String> = vault.keys().cloned().collect();
+        keys.sort();
 
         Ok(keys)
     }
