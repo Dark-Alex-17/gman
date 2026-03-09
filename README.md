@@ -14,8 +14,8 @@ files or sprinkling environment variables everywhere.
 
 ## Overview
 
-`gman` acts as a universal wrapper for any command that needs credentials. Store your secrets—API tokens, passwords,
-certs—with a provider, then either fetch them directly or run your command through `gman` to inject what it needs as
+`gman` acts as a universal wrapper for any command that needs credentials. Store your secrets (e.g. API tokens, passwords,
+certs, etc.) with a provider, then either fetch them directly or run your command through `gman` to inject what it needs as
 environment variables, flags, or file content.
 
 ## Quick Examples: Before vs After
@@ -694,7 +694,7 @@ gman managarr
 
 ### Multiple Providers and Switching
 
-You can define multiple providers—even multiple of the same type—and switch between them per command.
+You can define multiple providers (even multiple of the same type) and switch between them per command.
 
 Example: two AWS Secrets Manager providers named `lab` and `prod`.
 
