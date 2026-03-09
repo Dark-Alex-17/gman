@@ -96,6 +96,7 @@ gman aws sts get-caller-identity
   - [GCP Secret Manager](#provider-gcp_secret_manager)
   - [Azure Key Vault](#provider-azure_key_vault)
   - [Gopass](#provider-gopass)
+  - [1Password](#provider-one_password)
 - [Run Configurations](#run-configurations) 
   - [Specifying a Default Provider per Run Config](#specifying-a-default-provider-per-run-config)
   - [Environment Variable Secret Injection](#environment-variable-secret-injection)
@@ -287,7 +288,7 @@ documented and added without breaking existing setups. The following table shows
 | [`azure_key_vault`](https://azure.microsoft.com/en-us/products/key-vault/)                                               | ✅      | [Azure Key Vault](#provider-azure_key_vault)         |                                            |
 | [`gcp_secret_manager`](https://cloud.google.com/security/products/secret-manager?hl=en)                                  | ✅      | [GCP Secret Manager](#provider-gcp_secret_manager)   |                                            |
 | [`gopass`](https://www.gopass.pw/)                                                                                      | ✅     |                                                      |                                            |
-| [`1password`](https://1password.com/)                                                                                    | 🕒     |                                                      |                                            |
+| [`1password`](https://1password.com/)                                                                                    | ✅      | [1Password](#provider-one_password)                  |                                            |
 | [`bitwarden`](https://bitwarden.com/)                                                                                    | 🕒     |                                                      |                                            |
 | [`dashlane`](https://www.dashlane.com/)                                                                                  | 🕒     |                                                      | Waiting for CLI support for adding secrets |
 | [`lastpass`](https://www.lastpass.com/)                                                                                  | 🕒     |                                                      |                                            |
@@ -450,6 +451,42 @@ Important notes:
 - Secrets are managed using gopass's native commands; `gman` acts as a wrapper to interface with gopass.
 - Updates overwrite existing secrets
 - If no store is specified, the default gopass store is used and `gman sync` will sync with all configured stores.
+
+### Provider: `one_password`
+The `one_password` provider uses the [1Password CLI (`op`)](https://developer.1password.com/docs/cli/) as the backing
+storage location for secrets.
+
+- Optional: `vault` (string) to specify which 1Password vault to use. If omitted, the default vault is used.
+- Optional: `account` (string) to specify which 1Password account to use. Useful if you have multiple accounts. If
+  omitted, the default signed-in account is used.
+
+Configuration example:
+
+```yaml
+default_provider: op
+providers:
+  - name: op
+    type: one_password
+    vault: Production          # Optional; if omitted, uses the default vault
+    account: my.1password.com  # Optional; if omitted, uses the default account
+```
+
+Authentication:
+- **Interactive**: Run `op signin` to sign in interactively.
+- **Service Account**: Set the `OP_SERVICE_ACCOUNT_TOKEN` environment variable for non-interactive/CI usage.
+- **Desktop App Integration**: If the 1Password desktop app is installed and configured, the CLI can use biometric
+  authentication (Touch ID, Windows Hello, etc.).
+
+Important notes:
+- Ensure the 1Password CLI (`op`) is installed on your system. Install instructions are at
+  https://developer.1password.com/docs/cli/get-started/.
+- Secrets are stored as 1Password Password items. The item title is the secret name and the `password` field holds the
+  secret value.
+- **Deletions are permanent. Deleted items are not archived.**
+- `add` creates a new Password item. If an item with the same title already exists in the vault, `op` will create a
+  duplicate. Use `update` to change an existing secret value.
+- `list` returns the titles of all items in the configured vault.
+
 ## Run Configurations
 
 Run configurations (or "profiles") tell `gman` how to inject secrets into a command. Three modes of secret injection are

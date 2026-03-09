@@ -8,9 +8,11 @@ pub mod gcp_secret_manager;
 mod git_sync;
 pub mod gopass;
 pub mod local;
+pub mod one_password;
 
 use crate::providers::gopass::GopassProvider;
 use crate::providers::local::LocalProvider;
+use crate::providers::one_password::OnePasswordProvider;
 use anyhow::{Context, Result, anyhow};
 use aws_secrets_manager::AwsSecretsManagerProvider;
 use azure_key_vault::AzureKeyVaultProvider;
@@ -76,6 +78,10 @@ pub enum SupportedProvider {
         #[serde(flatten)]
         provider_def: GopassProvider,
     },
+    OnePassword {
+        #[serde(flatten)]
+        provider_def: OnePasswordProvider,
+    },
 }
 
 impl Validate for SupportedProvider {
@@ -86,6 +92,7 @@ impl Validate for SupportedProvider {
             SupportedProvider::GcpSecretManager { provider_def } => provider_def.validate(),
             SupportedProvider::AzureKeyVault { provider_def } => provider_def.validate(),
             SupportedProvider::Gopass { provider_def } => provider_def.validate(),
+            SupportedProvider::OnePassword { provider_def } => provider_def.validate(),
         }
     }
 }
@@ -106,6 +113,7 @@ impl Display for SupportedProvider {
             SupportedProvider::GcpSecretManager { .. } => write!(f, "gcp_secret_manager"),
             SupportedProvider::AzureKeyVault { .. } => write!(f, "azure_key_vault"),
             SupportedProvider::Gopass { .. } => write!(f, "gopass"),
+            SupportedProvider::OnePassword { .. } => write!(f, "one_password"),
         }
     }
 }

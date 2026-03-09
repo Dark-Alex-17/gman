@@ -169,6 +169,10 @@ impl ProviderConfig {
                 debug!("Using Gopass provider");
                 provider_def
             }
+            SupportedProvider::OnePassword { provider_def } => {
+                debug!("Using 1Password provider");
+                provider_def
+            }
         }
     }
 }
