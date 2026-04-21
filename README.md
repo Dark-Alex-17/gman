@@ -2,7 +2,6 @@
 
 ![Check](https://github.com/Dark-Alex-17/gman/actions/workflows/check.yml/badge.svg)
 ![Test](https://github.com/Dark-Alex-17/gman/actions/workflows/test.yml/badge.svg)
-![LOC](https://tokei.rs/b1/github/Dark-Alex-17/gman?category=code)
 [![crates.io link](https://img.shields.io/crates/v/gman.svg)](https://crates.io/crates/gman)
 ![Release](https://img.shields.io/github/v/release/Dark-Alex-17/gman?color=%23c694ff)
 ![Crate.io downloads](https://img.shields.io/crates/d/gman?label=Crate%20downloads)
@@ -280,18 +279,18 @@ documented and added without breaking existing setups. The following table shows
 | 🚫     | Won't Add |
 
 
-| Provider Name                                                                                                            | Status | Configuration Docs                                   | Comments                                   |
-|--------------------------------------------------------------------------------------------------------------------------|--------|------------------------------------------------------|--------------------------------------------|
-| `local`                                                                                                                  | ✅      | [Local](#provider-local)                             |                                            |
-| [`aws_secrets_manager`](https://docs.aws.amazon.com/secretsmanager/latest/userguide/intro.html)                          | ✅      | [AWS Secrets Manager](#provider-aws_secrets_manager) |                                            |
-| [`hashicorp_vault`](https://www.hashicorp.com/en/products/vault)                                                         | 🕒     |                                                      |                                            |
-| [`azure_key_vault`](https://azure.microsoft.com/en-us/products/key-vault/)                                               | ✅      | [Azure Key Vault](#provider-azure_key_vault)         |                                            |
-| [`gcp_secret_manager`](https://cloud.google.com/security/products/secret-manager?hl=en)                                  | ✅      | [GCP Secret Manager](#provider-gcp_secret_manager)   |                                            |
-| [`gopass`](https://www.gopass.pw/)                                                                                      | ✅     |                                                      |                                            |
-| [`1password`](https://1password.com/)                                                                                    | ✅      | [1Password](#provider-one_password)                  |                                            |
-| [`bitwarden`](https://bitwarden.com/)                                                                                    | 🕒     |                                                      |                                            |
-| [`dashlane`](https://www.dashlane.com/)                                                                                  | 🕒     |                                                      | Waiting for CLI support for adding secrets |
-| [`lastpass`](https://www.lastpass.com/)                                                                                  | 🕒     |                                                      |                                            |
+| Provider Name                                                                                   | Status | Configuration Docs                                   | Comments                                   |
+|-------------------------------------------------------------------------------------------------|--------|------------------------------------------------------|--------------------------------------------|
+| `local`                                                                                         | ✅      | [Local](#provider-local)                             |                                            |
+| [`aws_secrets_manager`](https://docs.aws.amazon.com/secretsmanager/latest/userguide/intro.html) | ✅      | [AWS Secrets Manager](#provider-aws_secrets_manager) |                                            |
+| [`hashicorp_vault`](https://www.hashicorp.com/en/products/vault)                                | 🕒     |                                                      |                                            |
+| [`azure_key_vault`](https://azure.microsoft.com/en-us/products/key-vault/)                      | ✅      | [Azure Key Vault](#provider-azure_key_vault)         |                                            |
+| [`gcp_secret_manager`](https://cloud.google.com/security/products/secret-manager?hl=en)         | ✅      | [GCP Secret Manager](#provider-gcp_secret_manager)   |                                            |
+| [`gopass`](https://www.gopass.pw/)                                                              | ✅      | [Gopass](#provider-gopass)                           |                                            |
+| [`1password`](https://1password.com/)                                                           | ✅      | [1Password](#provider-one_password)                  |                                            |
+| [`bitwarden`](https://bitwarden.com/)                                                           | 🕒     |                                                      |                                            |
+| [`dashlane`](https://www.dashlane.com/)                                                         | 🕒     |                                                      | Waiting for CLI support for adding secrets |
+| [`lastpass`](https://www.lastpass.com/)                                                         | 🕒     |                                                      |                                            |
 
 ### Provider: `local`
 
