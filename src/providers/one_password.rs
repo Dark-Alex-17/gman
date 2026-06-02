@@ -1,10 +1,23 @@
-use crate::providers::{ENV_PATH, SecretProvider};
-use anyhow::{Context, Result, anyhow};
-use serde::{Deserialize, Serialize};
-use serde_with::skip_serializing_none;
 use std::io::Read;
 use std::process::{Command, Stdio};
+
+use anyhow::anyhow;
+use serde::{Deserialize, Serialize};
+use serde_with::skip_serializing_none;
 use validator::Validate;
+
+use crate::providers::error::SecretError;
+use crate::providers::{ENV_PATH, SecretProvider};
+
+const PROVIDER: &str = "one_password";
+
+fn map_spawn_err(e: std::io::Error) -> SecretError {
+    if e.kind() == std::io::ErrorKind::NotFound {
+        SecretError::CliNotFound { tool: "op" }
+    } else {
+        SecretError::Io(e)
+    }
+}
 
 #[skip_serializing_none]
 /// 1Password-based secret provider.
@@ -53,13 +66,33 @@ impl OnePasswordProvider {
     }
 }
 
+fn classify_op_stderr(stderr: &str, key: Option<&str>) -> SecretError {
+    let lc = stderr.to_lowercase();
+    if lc.contains("isn't an item") || lc.contains("doesn't exist") || lc.contains("not found") {
+        SecretError::NotFound {
+            key: key.unwrap_or("").to_string(),
+            provider: PROVIDER,
+        }
+    } else if lc.contains("not currently signed in")
+        || lc.contains("session expired")
+        || lc.contains("not signed in")
+    {
+        SecretError::AuthFailed {
+            provider: PROVIDER,
+            source: anyhow!("op auth error: {}", stderr.trim()),
+        }
+    } else {
+        SecretError::Other(anyhow!("op command failed: {}", stderr.trim()))
+    }
+}
+
 #[async_trait::async_trait]
 impl SecretProvider for OnePasswordProvider {
     fn name(&self) -> &'static str {
         "OnePasswordProvider"
     }
 
-    async fn get_secret(&self, key: &str) -> Result<String> {
+    async fn get_secret(&self, key: &str) -> Result<String, SecretError> {
         ensure_op_installed()?;
 
         let mut cmd = self.base_command();
@@ -67,27 +100,27 @@ impl SecretProvider for OnePasswordProvider {
         cmd.args(self.vault_args());
         cmd.stdin(Stdio::inherit())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit());
+            .stderr(Stdio::piped());
 
-        let mut child = cmd.spawn().context("Failed to spawn op command")?;
+        let mut child = cmd.spawn().map_err(map_spawn_err)?;
 
         let mut output = String::new();
         child
             .stdout
             .as_mut()
             .expect("Failed to open op stdout")
-            .read_to_string(&mut output)
-            .context("Failed to read op output")?;
+            .read_to_string(&mut output)?;
 
-        let status = child.wait().context("Failed to wait on op process")?;
-        if !status.success() {
-            return Err(anyhow!("op command failed with status: {}", status));
+        let result = child.wait_with_output()?;
+        if !result.status.success() {
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            return Err(classify_op_stderr(&stderr, Some(key)));
         }
 
         Ok(output.trim_end_matches(&['\r', '\n'][..]).to_string())
     }
 
-    async fn set_secret(&self, key: &str, value: &str) -> Result<()> {
+    async fn set_secret(&self, key: &str, value: &str) -> Result<(), SecretError> {
         ensure_op_installed()?;
 
         let mut cmd = self.base_command();
@@ -96,19 +129,20 @@ impl SecretProvider for OnePasswordProvider {
         cmd.arg(format!("password={}", value));
         cmd.stdin(Stdio::inherit())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit());
+            .stderr(Stdio::piped());
 
-        let mut child = cmd.spawn().context("Failed to spawn op command")?;
+        let child = cmd.spawn().map_err(map_spawn_err)?;
 
-        let status = child.wait().context("Failed to wait on op process")?;
-        if !status.success() {
-            return Err(anyhow!("op command failed with status: {}", status));
+        let result = child.wait_with_output()?;
+        if !result.status.success() {
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            return Err(classify_op_stderr(&stderr, Some(key)));
         }
 
         Ok(())
     }
 
-    async fn update_secret(&self, key: &str, value: &str) -> Result<()> {
+    async fn update_secret(&self, key: &str, value: &str) -> Result<(), SecretError> {
         ensure_op_installed()?;
 
         let mut cmd = self.base_command();
@@ -117,19 +151,20 @@ impl SecretProvider for OnePasswordProvider {
         cmd.arg(format!("password={}", value));
         cmd.stdin(Stdio::inherit())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit());
+            .stderr(Stdio::piped());
 
-        let mut child = cmd.spawn().context("Failed to spawn op command")?;
+        let child = cmd.spawn().map_err(map_spawn_err)?;
 
-        let status = child.wait().context("Failed to wait on op process")?;
-        if !status.success() {
-            return Err(anyhow!("op command failed with status: {}", status));
+        let result = child.wait_with_output()?;
+        if !result.status.success() {
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            return Err(classify_op_stderr(&stderr, Some(key)));
         }
 
         Ok(())
     }
 
-    async fn delete_secret(&self, key: &str) -> Result<()> {
+    async fn delete_secret(&self, key: &str) -> Result<(), SecretError> {
         ensure_op_installed()?;
 
         let mut cmd = self.base_command();
@@ -137,19 +172,20 @@ impl SecretProvider for OnePasswordProvider {
         cmd.args(self.vault_args());
         cmd.stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit());
+            .stderr(Stdio::piped());
 
-        let mut child = cmd.spawn().context("Failed to spawn op command")?;
+        let child = cmd.spawn().map_err(map_spawn_err)?;
 
-        let status = child.wait().context("Failed to wait on op process")?;
-        if !status.success() {
-            return Err(anyhow!("op command failed with status: {}", status));
+        let result = child.wait_with_output()?;
+        if !result.status.success() {
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            return Err(classify_op_stderr(&stderr, Some(key)));
         }
 
         Ok(())
     }
 
-    async fn list_secrets(&self) -> Result<Vec<String>> {
+    async fn list_secrets(&self) -> Result<Vec<String>, SecretError> {
         ensure_op_installed()?;
 
         let mut cmd = self.base_command();
@@ -157,25 +193,25 @@ impl SecretProvider for OnePasswordProvider {
         cmd.args(self.vault_args());
         cmd.stdin(Stdio::inherit())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit());
+            .stderr(Stdio::piped());
 
-        let mut child = cmd.spawn().context("Failed to spawn op command")?;
+        let mut child = cmd.spawn().map_err(map_spawn_err)?;
 
         let mut output = String::new();
         child
             .stdout
             .as_mut()
             .expect("Failed to open op stdout")
-            .read_to_string(&mut output)
-            .context("Failed to read op output")?;
+            .read_to_string(&mut output)?;
 
-        let status = child.wait().context("Failed to wait on op process")?;
-        if !status.success() {
-            return Err(anyhow!("op command failed with status: {}", status));
+        let result = child.wait_with_output()?;
+        if !result.status.success() {
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            return Err(classify_op_stderr(&stderr, None));
         }
 
-        let items: Vec<serde_json::Value> =
-            serde_json::from_str(&output).context("Failed to parse op item list JSON output")?;
+        let items: Vec<serde_json::Value> = serde_json::from_str(&output)
+            .map_err(|e| SecretError::Other(anyhow!("failed to parse op output: {}", e)))?;
 
         let secrets: Vec<String> = items
             .iter()
@@ -187,12 +223,9 @@ impl SecretProvider for OnePasswordProvider {
     }
 }
 
-fn ensure_op_installed() -> Result<()> {
+fn ensure_op_installed() -> Result<(), SecretError> {
     if which::which("op").is_err() {
-        Err(anyhow!(
-            "1Password CLI (op) is not installed or not found in PATH. \
-             Please install it from https://developer.1password.com/docs/cli/get-started/"
-        ))
+        Err(SecretError::CliNotFound { tool: "op" })
     } else {
         Ok(())
     }

@@ -1,21 +1,8 @@
-use anyhow::{Context, anyhow, bail};
-use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::{env, fs};
-use zeroize::Zeroize;
 
-use crate::config::{Config, get_config_file_path, load_config};
-use crate::providers::git_sync::{
-    SyncOpts, default_git_email, default_git_username, ensure_git_available, repo_name_from_url,
-    resolve_git, sync_and_push,
-};
-use crate::providers::{SecretProvider, SupportedProvider};
-use crate::{
-    ARGON_M_COST_KIB, ARGON_P, ARGON_T_COST, HEADER, KDF, KEY_LEN, NONCE_LEN, SALT_LEN, VERSION,
-    calling_app_name,
-};
-use anyhow::Result;
+use anyhow::{Context as _, anyhow};
 use argon2::{Algorithm, Argon2, Params, Version};
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use chacha20poly1305::aead::rand_core::RngCore;
@@ -25,10 +12,35 @@ use chacha20poly1305::{
 };
 use dialoguer::{Input, theme};
 use log::{debug, error};
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use theme::ColorfulTheme;
 use validator::Validate;
+use zeroize::Zeroize;
+
+use crate::config::{Config, get_config_file_path, load_config};
+use crate::providers::error::SecretError;
+use crate::providers::git_sync::{
+    SyncOpts, default_git_email, default_git_username, ensure_git_available, repo_name_from_url,
+    resolve_git, sync_and_push,
+};
+use crate::providers::{SecretProvider, SupportedProvider};
+use crate::{
+    ARGON_M_COST_KIB, ARGON_P, ARGON_T_COST, HEADER, KDF, KEY_LEN, NONCE_LEN, SALT_LEN, VERSION,
+    calling_app_name,
+};
+
+const PROVIDER: &str = "local";
+
+type LocalResult<T> = std::result::Result<T, SecretError>;
+
+fn cfg_err(message: impl Into<String>) -> SecretError {
+    SecretError::Config {
+        provider: PROVIDER,
+        message: message.into(),
+    }
+}
 
 #[skip_serializing_none]
 /// File-based vault provider with optional Git sync.
@@ -87,12 +99,13 @@ impl SecretProvider for LocalProvider {
         "LocalProvider"
     }
 
-    async fn get_secret(&self, key: &str) -> Result<String> {
+    async fn get_secret(&self, key: &str) -> LocalResult<String> {
         let vault_path = self.active_vault_path()?;
         let vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
-        let envelope = vault
-            .get(key)
-            .with_context(|| format!("key '{key}' not found in the vault"))?;
+        let envelope = vault.get(key).ok_or_else(|| SecretError::NotFound {
+            key: key.to_string(),
+            provider: PROVIDER,
+        })?;
 
         let password = self.get_password()?;
         let plaintext = decrypt_string(&password, envelope)?;
@@ -101,61 +114,69 @@ impl SecretProvider for LocalProvider {
         Ok(plaintext)
     }
 
-    async fn set_secret(&self, key: &str, value: &str) -> Result<()> {
+    async fn set_secret(&self, key: &str, value: &str) -> LocalResult<()> {
         let vault_path = self.active_vault_path()?;
         let mut vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
         if vault.contains_key(key) {
             error!(
                 "Key '{key}' already exists in the vault. Use a different key or delete the existing one first."
             );
-            bail!("key '{key}' already exists");
+            return Err(SecretError::AlreadyExists {
+                key: key.to_string(),
+                provider: PROVIDER,
+            });
         }
 
         let password = self.get_password()?;
-        let envelope = encrypt_string(&password, value)?;
+        let envelope =
+            encrypt_string(&password, value).map_err(SecretError::Other)?;
         drop(password);
 
         vault.insert(key.to_string(), envelope);
 
-        store_vault(&vault_path, &vault).with_context(|| "failed to save secret to the vault")
+        store_vault(&vault_path, &vault)
     }
 
-    async fn update_secret(&self, key: &str, value: &str) -> Result<()> {
+    async fn update_secret(&self, key: &str, value: &str) -> LocalResult<()> {
         let vault_path = self.active_vault_path()?;
         let mut vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
 
         let password = self.get_password()?;
-        let envelope = encrypt_string(&password, value)?;
+        let envelope =
+            encrypt_string(&password, value).map_err(SecretError::Other)?;
         drop(password);
 
         if vault.contains_key(key) {
             debug!("Key '{key}' exists in vault. Overwriting previous value");
-            let vault_entry = vault
-                .get_mut(key)
-                .with_context(|| format!("key '{key}' not found in the vault"))?;
+            let vault_entry = vault.get_mut(key).ok_or_else(|| SecretError::NotFound {
+                key: key.to_string(),
+                provider: PROVIDER,
+            })?;
             *vault_entry = envelope;
 
-            return store_vault(&vault_path, &vault)
-                .with_context(|| "failed to save secret to the vault");
+            return store_vault(&vault_path, &vault);
         }
 
         vault.insert(key.to_string(), envelope);
-        store_vault(&vault_path, &vault).with_context(|| "failed to save secret to the vault")
+        store_vault(&vault_path, &vault)
     }
 
-    async fn delete_secret(&self, key: &str) -> Result<()> {
+    async fn delete_secret(&self, key: &str) -> LocalResult<()> {
         let vault_path = self.active_vault_path()?;
         let mut vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
         if !vault.contains_key(key) {
             error!("Key '{key}' does not exist in the vault.");
-            bail!("key '{key}' does not exist");
+            return Err(SecretError::NotFound {
+                key: key.to_string(),
+                provider: PROVIDER,
+            });
         }
 
         vault.remove(key);
-        store_vault(&vault_path, &vault).with_context(|| "failed to save secret to the vault")
+        store_vault(&vault_path, &vault)
     }
 
-    async fn list_secrets(&self) -> Result<Vec<String>> {
+    async fn list_secrets(&self) -> LocalResult<Vec<String>> {
         let vault_path = self.active_vault_path()?;
         let vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
         let mut keys: Vec<String> = vault.keys().cloned().collect();
@@ -164,7 +185,7 @@ impl SecretProvider for LocalProvider {
         Ok(keys)
     }
 
-    async fn sync(&mut self) -> Result<()> {
+    async fn sync(&mut self) -> LocalResult<()> {
         let mut config_changed = false;
         let git = resolve_git(self.git_executable.as_ref())?;
         ensure_git_available(&git)?;
@@ -175,7 +196,8 @@ impl SecretProvider for LocalProvider {
             let branch: String = Input::with_theme(&ColorfulTheme::default())
                 .with_prompt("Enter git branch to sync with")
                 .default("main".into())
-                .interact_text()?;
+                .interact_text()
+                .map_err(|e| cfg_err(format!("prompt failed: {}", e)))?;
 
             self.git_branch = Some(branch);
         }
@@ -196,7 +218,8 @@ impl SecretProvider for LocalProvider {
                     .map(|_| ())
                     .map_err(|e| e.to_string())
                 })
-                .interact_text()?;
+                .interact_text()
+                .map_err(|e| cfg_err(format!("prompt failed: {}", e)))?;
 
             self.git_remote_url = Some(remote);
         }
@@ -204,11 +227,15 @@ impl SecretProvider for LocalProvider {
         if self.git_user_name.is_none() {
             config_changed = true;
             debug!("Prompting user git user name");
-            let default_user_name = default_git_username(&git)?.trim().to_string();
+            let default_user_name = default_git_username(&git)
+                .map_err(SecretError::from)?
+                .trim()
+                .to_string();
             let branch: String = Input::with_theme(&ColorfulTheme::default())
                 .with_prompt("Enter git user name")
                 .default(default_user_name)
-                .interact_text()?;
+                .interact_text()
+                .map_err(|e| cfg_err(format!("prompt failed: {}", e)))?;
 
             self.git_user_name = Some(branch);
         }
@@ -216,7 +243,10 @@ impl SecretProvider for LocalProvider {
         if self.git_user_email.is_none() {
             config_changed = true;
             debug!("Prompting user git email");
-            let default_user_name = default_git_email(&git)?.trim().to_string();
+            let default_user_name = default_git_email(&git)
+                .map_err(SecretError::from)?
+                .trim()
+                .to_string();
             let branch: String = Input::with_theme(&ColorfulTheme::default())
                 .with_prompt("Enter git user email")
                 .validate_with({
@@ -229,7 +259,8 @@ impl SecretProvider for LocalProvider {
                     }
                 })
                 .default(default_user_name)
-                .interact_text()?;
+                .interact_text()
+                .map_err(|e| cfg_err(format!("prompt failed: {}", e)))?;
 
             self.git_user_email = Some(branch);
         }
@@ -246,15 +277,17 @@ impl SecretProvider for LocalProvider {
             git_executable: &self.git_executable,
         };
 
-        sync_and_push(&sync_opts)
+        sync_and_push(&sync_opts)?;
+        Ok(())
     }
 }
 
 impl LocalProvider {
-    fn persist_git_settings_to_config(&self) -> Result<()> {
+    fn persist_git_settings_to_config(&self) -> LocalResult<()> {
         debug!("Saving updated config (only current local provider)");
 
-        let mut cfg = load_config(true).with_context(|| "failed to load existing config")?;
+        let mut cfg = load_config(true)
+            .map_err(|e| cfg_err(format!("failed to load existing config: {}", e)))?;
 
         let target_name = self.runtime_provider_name.clone();
         let mut updated = false;
@@ -281,26 +314,30 @@ impl LocalProvider {
         }
 
         if !updated {
-            bail!("unable to find matching local provider in config to update");
+            return Err(cfg_err(
+                "unable to find matching local provider in config to update",
+            ));
         }
 
-        let path = get_config_file_path()?;
+        let path = get_config_file_path()
+            .map_err(|e| cfg_err(format!("failed to determine config path: {}", e)))?;
         let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
         if ext.eq_ignore_ascii_case("yml") || ext.eq_ignore_ascii_case("yaml") {
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)?;
             }
-            let s = serde_yaml::to_string(&cfg)?;
-            fs::write(&path, s).with_context(|| format!("failed to write {}", path.display()))?;
+            let s = serde_yaml::to_string(&cfg)
+                .map_err(|e| cfg_err(format!("serialize config: {}", e)))?;
+            fs::write(&path, s)?;
         } else {
             confy::store(&calling_app_name(), "config", &cfg)
-                .with_context(|| "failed to save updated config via confy")?;
+                .map_err(|e| cfg_err(format!("failed to save updated config via confy: {}", e)))?;
         }
 
         Ok(())
     }
 
-    fn repo_dir_for_config(&self) -> Result<Option<PathBuf>> {
+    fn repo_dir_for_config(&self) -> LocalResult<Option<PathBuf>> {
         if let Some(remote) = &self.git_remote_url {
             let name = repo_name_from_url(remote);
             let dir = base_config_dir()?.join(format!(".{}", name));
@@ -310,7 +347,7 @@ impl LocalProvider {
         }
     }
 
-    fn active_vault_path(&self) -> Result<PathBuf> {
+    fn active_vault_path(&self) -> LocalResult<PathBuf> {
         if let Some(dir) = self.repo_dir_for_config()?
             && dir.exists()
         {
@@ -320,27 +357,24 @@ impl LocalProvider {
         default_vault_path()
     }
 
-    fn get_password(&self) -> Result<SecretString> {
+    fn get_password(&self) -> LocalResult<SecretString> {
         if let Some(password_file) = &self.password_file {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let metadata = fs::metadata(password_file).with_context(|| {
-                    format!("failed to read password file metadata {:?}", password_file)
-                })?;
+                let metadata = fs::metadata(password_file)?;
                 let mode = metadata.permissions().mode();
                 if mode & 0o077 != 0 {
-                    bail!(
+                    return Err(cfg_err(format!(
                         "password file {:?} has insecure permissions {:o} (should be 0600 or 0400)",
                         password_file,
                         mode & 0o777
-                    );
+                    )));
                 }
             }
 
             let password = SecretString::new(
-                fs::read_to_string(password_file)
-                    .with_context(|| format!("failed to read password file {:?}", password_file))?
+                fs::read_to_string(password_file)?
                     .trim()
                     .to_string()
                     .into(),
@@ -354,7 +388,7 @@ impl LocalProvider {
     }
 }
 
-fn default_vault_path() -> Result<PathBuf> {
+fn default_vault_path() -> LocalResult<PathBuf> {
     let xdg_path = env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
 
     if let Some(xdg) = xdg_path {
@@ -362,17 +396,17 @@ fn default_vault_path() -> Result<PathBuf> {
     }
 
     confy::get_configuration_file_path(&calling_app_name(), "vault")
-        .with_context(|| "get config dir")
+        .map_err(|e| cfg_err(format!("get config dir: {}", e)))
 }
 
-fn base_config_dir() -> Result<PathBuf> {
+fn base_config_dir() -> LocalResult<PathBuf> {
     default_vault_path()?
         .parent()
         .map(Path::to_path_buf)
-        .ok_or_else(|| anyhow!("Failed to determine config dir"))
+        .ok_or_else(|| cfg_err("Failed to determine config dir"))
 }
 
-fn load_vault(path: &Path) -> Result<HashMap<String, String>> {
+fn load_vault(path: &Path) -> anyhow::Result<HashMap<String, String>> {
     if !path.exists() {
         return Ok(HashMap::new());
     }
@@ -381,26 +415,26 @@ fn load_vault(path: &Path) -> Result<HashMap<String, String>> {
     Ok(map)
 }
 
-fn store_vault(path: &Path, map: &HashMap<String, String>) -> Result<()> {
+fn store_vault(path: &Path, map: &HashMap<String, String>) -> LocalResult<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+        fs::create_dir_all(parent)?;
     }
-    let s = serde_yaml::to_string(map).with_context(|| "serialize vault")?;
-    fs::write(path, &s).with_context(|| format!("write {}", path.display()))?;
+    let s = serde_yaml::to_string(map)
+        .map_err(|e| SecretError::Other(anyhow!("serialize vault: {}", e)))?;
+    fs::write(path, &s)?;
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-            .with_context(|| format!("set permissions on {}", path.display()))?;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
     }
 
     Ok(())
 }
 
-fn encrypt_string(password: &SecretString, plaintext: &str) -> Result<String> {
+fn encrypt_string(password: &SecretString, plaintext: &str) -> anyhow::Result<String> {
     if password.expose_secret().is_empty() {
-        bail!("password cannot be empty");
+        anyhow::bail!("password cannot be empty");
     }
 
     let mut salt = [0u8; SALT_LEN];
@@ -456,7 +490,7 @@ fn derive_key_with_params(
     m_cost: u32,
     t_cost: u32,
     p: u32,
-) -> Result<Key> {
+) -> anyhow::Result<Key> {
     let params = Params::new(m_cost, t_cost, p, Some(KEY_LEN))
         .map_err(|e| anyhow!("argon2 params error: {:?}", e))?;
     let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
@@ -469,11 +503,10 @@ fn derive_key_with_params(
     Ok(key)
 }
 
-fn derive_key(password: &SecretString, salt: &[u8]) -> Result<Key> {
+fn derive_key(password: &SecretString, salt: &[u8]) -> anyhow::Result<Key> {
     derive_key_with_params(password, salt, ARGON_M_COST_KIB, ARGON_T_COST, ARGON_P)
 }
 
-/// Attempts to decrypt with the given cipher, nonce, ciphertext, and AAD.
 fn try_decrypt(
     cipher: &XChaCha20Poly1305,
     nonce: &XNonce,
@@ -485,25 +518,29 @@ fn try_decrypt(
 
 type EnvelopeComponents = (u32, u32, u32, Vec<u8>, [u8; NONCE_LEN], Vec<u8>);
 
-/// Parse an envelope string and extract its components.
-/// Returns (m, t, p, salt, nonce_arr, ct) on success.
-fn parse_envelope(envelope: &str) -> Result<EnvelopeComponents> {
+fn parse_envelope(envelope: &str) -> LocalResult<EnvelopeComponents> {
     let parts: Vec<&str> = envelope.trim().split(';').collect();
     if parts.len() < 7 {
         debug!("Invalid envelope format: {:?}", parts);
-        bail!("invalid envelope format");
+        return Err(SecretError::Other(anyhow!("invalid envelope format")));
     }
     if parts[0] != HEADER {
         debug!("Invalid header: {}", parts[0]);
-        bail!("unexpected header");
+        return Err(SecretError::Other(anyhow!("unexpected header")));
     }
     if parts[1] != VERSION {
         debug!("Unsupported version: {}", parts[1]);
-        bail!("unsupported version {}", parts[1]);
+        return Err(SecretError::Unsupported {
+            operation: "decrypt_envelope_version",
+            provider: PROVIDER,
+        });
     }
     if parts[2] != KDF {
         debug!("Unsupported kdf: {}", parts[2]);
-        bail!("unsupported kdf {}", parts[2]);
+        return Err(SecretError::Unsupported {
+            operation: "decrypt_kdf",
+            provider: PROVIDER,
+        });
     }
 
     let params_str = parts[3];
@@ -523,31 +560,39 @@ fn parse_envelope(envelope: &str) -> Result<EnvelopeComponents> {
 
     let salt_b64 = parts[4]
         .strip_prefix("salt=")
-        .with_context(|| "missing salt")?;
+        .ok_or_else(|| SecretError::Other(anyhow!("missing salt")))?;
     let nonce_b64 = parts[5]
         .strip_prefix("nonce=")
-        .with_context(|| "missing nonce")?;
-    let ct_b64 = parts[6].strip_prefix("ct=").with_context(|| "missing ct")?;
+        .ok_or_else(|| SecretError::Other(anyhow!("missing nonce")))?;
+    let ct_b64 = parts[6]
+        .strip_prefix("ct=")
+        .ok_or_else(|| SecretError::Other(anyhow!("missing ct")))?;
 
-    let salt = B64.decode(salt_b64).with_context(|| "bad salt b64")?;
-    let nonce_bytes = B64.decode(nonce_b64).with_context(|| "bad nonce b64")?;
-    let ct = B64.decode(ct_b64).with_context(|| "bad ct b64")?;
+    let salt = B64
+        .decode(salt_b64)
+        .map_err(|e| SecretError::Other(anyhow!("bad salt b64: {}", e)))?;
+    let nonce_bytes = B64
+        .decode(nonce_b64)
+        .map_err(|e| SecretError::Other(anyhow!("bad nonce b64: {}", e)))?;
+    let ct = B64
+        .decode(ct_b64)
+        .map_err(|e| SecretError::Other(anyhow!("bad ct b64: {}", e)))?;
 
     if nonce_bytes.len() != NONCE_LEN {
         debug!("Nonce length mismatch: {}", nonce_bytes.len());
-        bail!("nonce length mismatch");
+        return Err(SecretError::Other(anyhow!("nonce length mismatch")));
     }
 
     let nonce_arr: [u8; NONCE_LEN] = nonce_bytes
         .try_into()
-        .map_err(|_| anyhow!("invalid nonce length"))?;
+        .map_err(|_| SecretError::Other(anyhow!("invalid nonce length")))?;
 
     Ok((m, t, p, salt, nonce_arr, ct))
 }
 
-fn decrypt_string(password: &SecretString, envelope: &str) -> Result<String> {
+fn decrypt_string(password: &SecretString, envelope: &str) -> LocalResult<String> {
     if password.expose_secret().is_empty() {
-        bail!("password cannot be empty");
+        return Err(cfg_err("password cannot be empty"));
     }
 
     let (m, t, p, mut salt, mut nonce_arr, mut ct) = parse_envelope(envelope)?;
@@ -555,11 +600,16 @@ fn decrypt_string(password: &SecretString, envelope: &str) -> Result<String> {
 
     let aad_current = format!("{};{};{};m={},t={},p={}", HEADER, VERSION, KDF, m, t, p);
 
-    let mut key = derive_key_with_params(password, &salt, m, t, p)?;
+    let mut key = derive_key_with_params(password, &salt, m, t, p)
+        .map_err(|source| SecretError::AuthFailed {
+            provider: PROVIDER,
+            source,
+        })?;
     let cipher = XChaCha20Poly1305::new(&key);
 
     if let Ok(pt) = try_decrypt(&cipher, &nonce, &ct, aad_current.as_bytes()) {
-        let s = String::from_utf8(pt.clone()).with_context(|| "plaintext not valid UTF-8")?;
+        let s = String::from_utf8(pt.clone())
+            .map_err(|e| SecretError::Other(anyhow!("plaintext not valid UTF-8: {}", e)))?;
         key.zeroize();
         salt.zeroize();
         nonce_arr.zeroize();
@@ -572,168 +622,21 @@ fn decrypt_string(password: &SecretString, envelope: &str) -> Result<String> {
     nonce_arr.zeroize();
     ct.zeroize();
 
-    // TODO: Remove once all users have migrated their local vaults
-    if let Ok(plaintext) = legacy::decrypt_string_legacy(password, envelope) {
-        return Ok(plaintext);
-    }
-
-    bail!("decryption failed (wrong password or corrupted data)")
-}
-
-// TODO: Remove this entire module once all users have migrated their vaults.
-mod legacy {
-    use super::*;
-
-    fn legacy_aad() -> String {
-        format!("{};{}", HEADER, VERSION)
-    }
-
-    pub fn decrypt_string_legacy(password: &SecretString, envelope: &str) -> Result<String> {
-        if password.expose_secret().is_empty() {
-            bail!("password cannot be empty");
-        }
-
-        let (m, t, p, mut salt, mut nonce_arr, mut ct) = parse_envelope(envelope)?;
-        let nonce: XNonce = nonce_arr.into();
-        let aad = legacy_aad();
-
-        let mut key = derive_key_with_params(password, &salt, m, t, p)?;
-        let cipher = XChaCha20Poly1305::new(&key);
-
-        if let Ok(pt) = try_decrypt(&cipher, &nonce, &ct, aad.as_bytes()) {
-            let s = String::from_utf8(pt.clone()).with_context(|| "plaintext not valid UTF-8")?;
-            key.zeroize();
-            salt.zeroize();
-            nonce_arr.zeroize();
-            ct.zeroize();
-            return Ok(s);
-        }
-
-        key.zeroize();
-
-        let mut zeros_key: Key = [0u8; KEY_LEN].into();
-        let zeros_cipher = XChaCha20Poly1305::new(&zeros_key);
-
-        if let Ok(pt) = try_decrypt(&zeros_cipher, &nonce, &ct, aad.as_bytes()) {
-            debug!("Decrypted using legacy all-zeros key - secret needs migration");
-            let s = String::from_utf8(pt.clone()).with_context(|| "plaintext not valid UTF-8")?;
-            zeros_key.zeroize();
-            salt.zeroize();
-            nonce_arr.zeroize();
-            ct.zeroize();
-            return Ok(s);
-        }
-
-        zeros_key.zeroize();
-        salt.zeroize();
-        nonce_arr.zeroize();
-        ct.zeroize();
-
-        bail!("legacy decryption failed")
-    }
-
-    pub fn is_current_format(password: &SecretString, envelope: &str) -> Result<bool> {
-        if password.expose_secret().is_empty() {
-            bail!("password cannot be empty");
-        }
-
-        let (m, t, p, salt, nonce_arr, ct) = parse_envelope(envelope)?;
-        let nonce: XNonce = nonce_arr.into();
-
-        let aad_current = format!("{};{};{};m={},t={},p={}", HEADER, VERSION, KDF, m, t, p);
-        let key = derive_key_with_params(password, &salt, m, t, p)?;
-        let cipher = XChaCha20Poly1305::new(&key);
-
-        Ok(try_decrypt(&cipher, &nonce, &ct, aad_current.as_bytes()).is_ok())
-    }
-}
-
-// TODO: Remove once all users have migrated their local vaults
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SecretStatus {
-    Current,
-    NeedsMigration,
-}
-
-// TODO: Remove once all users have migrated their local vaults
-#[derive(Debug)]
-pub struct MigrationResult {
-    pub total: usize,
-    pub migrated: usize,
-    pub already_current: usize,
-    pub failed: Vec<(String, String)>,
-}
-
-impl LocalProvider {
-    // TODO: Remove once all users have migrated their local vaults
-    pub async fn migrate_vault(&self) -> Result<MigrationResult> {
-        let vault_path = self.active_vault_path()?;
-        let vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
-
-        if vault.is_empty() {
-            return Ok(MigrationResult {
-                total: 0,
-                migrated: 0,
-                already_current: 0,
-                failed: vec![],
-            });
-        }
-
-        let password = self.get_password()?;
-        let mut migrated_vault = HashMap::new();
-        let mut migrated_count = 0;
-        let mut already_current_count = 0;
-        let mut failed = vec![];
-
-        for (key, envelope) in &vault {
-            match legacy::is_current_format(&password, envelope) {
-                Ok(true) => {
-                    migrated_vault.insert(key.clone(), envelope.clone());
-                    already_current_count += 1;
-                }
-                Ok(false) => match decrypt_string(&password, envelope) {
-                    Ok(plaintext) => match encrypt_string(&password, &plaintext) {
-                        Ok(new_envelope) => {
-                            migrated_vault.insert(key.clone(), new_envelope);
-                            migrated_count += 1;
-                        }
-                        Err(e) => {
-                            failed.push((key.clone(), format!("re-encryption failed: {}", e)));
-                            migrated_vault.insert(key.clone(), envelope.clone());
-                        }
-                    },
-                    Err(e) => {
-                        failed.push((key.clone(), format!("decryption failed: {}", e)));
-                        migrated_vault.insert(key.clone(), envelope.clone());
-                    }
-                },
-                Err(e) => {
-                    failed.push((key.clone(), format!("status check failed: {}", e)));
-                    migrated_vault.insert(key.clone(), envelope.clone());
-                }
-            }
-        }
-
-        if migrated_count > 0 {
-            store_vault(&vault_path, &migrated_vault)?;
-        }
-
-        Ok(MigrationResult {
-            total: vault.len(),
-            migrated: migrated_count,
-            already_current: already_current_count,
-            failed,
-        })
-    }
+    Err(SecretError::AuthFailed {
+        provider: PROVIDER,
+        source: anyhow!("decryption failed (wrong password or corrupted data)"),
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::env as std_env;
+
     use pretty_assertions::assert_eq;
     use secrecy::{ExposeSecret, SecretString};
-    use std::env as std_env;
     use tempfile::tempdir;
+
+    use super::*;
 
     #[test]
     fn test_derive_key() {

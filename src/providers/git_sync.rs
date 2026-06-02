@@ -1,14 +1,50 @@
-use crate::calling_app_name;
-use anyhow::{Context, Result, anyhow};
+use std::io;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::{env, fs};
+use anyhow::anyhow;
 use chrono::Utc;
 use dialoguer::Confirm;
 use dialoguer::theme::ColorfulTheme;
 use indoc::formatdoc;
 use log::debug;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::{env, fs};
+use thiserror::Error;
 use validator::Validate;
+
+use crate::calling_app_name;
+
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum SyncError {
+    #[error("git binary not found in PATH")]
+    GitNotFound,
+
+    #[error("git authentication failed (check SSH key / token): {source}")]
+    AuthFailed {
+        #[source]
+        source: anyhow::Error,
+    },
+
+    #[error("network error during git sync: {source}")]
+    Network {
+        #[source]
+        source: anyhow::Error,
+    },
+
+    #[error("git configuration error: {message}")]
+    Config { message: String },
+
+    #[error("git command failed: {message}")]
+    GitCommandFailed { message: String },
+
+    #[error("I/O error during sync: {0}")]
+    Io(#[from] io::Error),
+
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
+type SyncResult<T> = std::result::Result<T, SyncError>;
 
 #[derive(Debug, Validate, Clone)]
 pub struct SyncOpts<'a> {
@@ -21,38 +57,36 @@ pub struct SyncOpts<'a> {
     pub git_executable: &'a Option<PathBuf>,
 }
 
-pub fn sync_and_push(opts: &SyncOpts<'_>) -> Result<()> {
+pub fn sync_and_push(opts: &SyncOpts<'_>) -> SyncResult<()> {
     debug!("Syncing with git: {:?}", opts);
-    opts.validate()
-        .with_context(|| "invalid git sync options")?;
+    opts.validate().map_err(|e| SyncError::Config {
+        message: format!("invalid git sync options: {}", e),
+    })?;
     let commit_message = format!("chore: sync @ {}", Utc::now().to_rfc3339());
     let config_dir = confy::get_configuration_file_path(&calling_app_name(), "vault")
-        .with_context(|| "get config dir")?
+        .map_err(|e| SyncError::Config {
+            message: format!("get config dir: {}", e),
+        })?
         .parent()
         .map(Path::to_path_buf)
-        .ok_or_else(|| anyhow!("Failed to determine config dir"))?;
+        .ok_or_else(|| SyncError::Config {
+            message: "Failed to determine config dir".to_string(),
+        })?;
 
     let remote_url = opts.remote_url.as_ref().expect("no remote url defined");
     let repo_name = repo_name_from_url(remote_url);
     let repo_dir = config_dir.join(format!(".{}", repo_name));
-    fs::create_dir_all(&repo_dir).with_context(|| format!("create {}", repo_dir.display()))?;
+    fs::create_dir_all(&repo_dir)?;
 
-    // Move the default vault into the repo dir on first sync so only vault.yml is tracked.
     let default_vault = confy::get_configuration_file_path(&calling_app_name(), "vault")
-        .with_context(|| "get default vault path")?;
+        .map_err(|e| SyncError::Config {
+            message: format!("get default vault path: {}", e),
+        })?;
     let repo_vault = repo_dir.join("vault.yml");
     if default_vault.exists() && !repo_vault.exists() {
-        fs::rename(&default_vault, &repo_vault).with_context(|| {
-            format!(
-                "move {} -> {}",
-                default_vault.display(),
-                repo_vault.display()
-            )
-        })?;
+        fs::rename(&default_vault, &repo_vault)?;
     } else if !repo_vault.exists() {
-        // Ensure an empty vault exists to allow initial commits
-        fs::write(&repo_vault, "{}\n")
-            .with_context(|| format!("create {}", repo_vault.display()))?;
+        fs::write(&repo_vault, "{}\n")?;
     }
 
     let git = resolve_git(opts.git_executable.as_ref())?;
@@ -88,48 +122,43 @@ pub fn sync_and_push(opts: &SyncOpts<'_>) -> Result<()> {
     checkout_branch(&git, &repo_dir, branch)?;
     set_origin(&git, &repo_dir, remote_url)?;
 
-    // Always align local with remote before staging/committing. For a fresh
-    // repo where the remote already has content, we intentionally discard any
-    // local working tree changes and take the remote state to avoid merge
-    // conflicts on first sync.
     fetch_and_pull(&git, &repo_dir, branch)?;
 
-    // Stage and commit any subsequent local changes after aligning with remote
-    // so we don't merge uncommitted local state.
     stage_vault_only(&git, &repo_dir)?;
 
     commit_now(&git, &repo_dir, &commit_message)?;
 
-    run_git(
-        &git,
-        &repo_dir,
-        &["push", "-u", "origin", "--force", branch],
-    )?;
+    run_git_push(&git, &repo_dir, branch)?;
 
     run_git(&git, &repo_dir, &["remote", "set-head", "origin", "-a"])
-        .with_context(|| "Failed to set remote HEAD")
 }
 
-fn resolve_git_username(git: &Path, name: Option<&String>) -> Result<String> {
+fn resolve_git_username(git: &Path, name: Option<&String>) -> SyncResult<String> {
     debug!("Resolving git username");
 
     if let Some(name) = name {
         return Ok(name.to_string());
     }
 
-    default_git_username(git)
+    default_git_username(git).map_err(|_| SyncError::Config {
+        message: "git user.name not configured".to_string(),
+    })
 }
 
-fn resolve_git_email(git: &Path, email: Option<&String>) -> Result<String> {
+fn resolve_git_email(git: &Path, email: Option<&String>) -> SyncResult<String> {
     debug!("Resolving git user email");
     if let Some(email) = email {
         return Ok(email.to_string());
     }
 
-    default_git_email(git)
+    default_git_email(git).map_err(|_| SyncError::Config {
+        message: "git user.email not configured".to_string(),
+    })
 }
 
-pub(in crate::providers) fn resolve_git(override_path: Option<&PathBuf>) -> Result<PathBuf> {
+pub(in crate::providers) fn resolve_git(
+    override_path: Option<&PathBuf>,
+) -> SyncResult<PathBuf> {
     debug!("Resolving git executable");
     if let Some(p) = override_path {
         return Ok(p.to_path_buf());
@@ -140,63 +169,116 @@ pub(in crate::providers) fn resolve_git(override_path: Option<&PathBuf>) -> Resu
     Ok(PathBuf::from("git"))
 }
 
-pub(in crate::providers) fn default_git_username(git: &Path) -> Result<String> {
+pub(in crate::providers) fn default_git_username(git: &Path) -> SyncResult<String> {
     debug!("Checking for default git username");
-    run_git_config_capture(git, &["config", "user.name"])
-        .with_context(|| "unable to determine git user name")
+    run_git_config_capture(git, &["config", "user.name"]).map_err(|e| SyncError::Config {
+        message: format!("unable to determine git user name: {}", e),
+    })
 }
 
-pub(in crate::providers) fn default_git_email(git: &Path) -> Result<String> {
+pub(in crate::providers) fn default_git_email(git: &Path) -> SyncResult<String> {
     debug!("Checking for default git username");
-    run_git_config_capture(git, &["config", "user.email"])
-        .with_context(|| "unable to determine git user email")
+    run_git_config_capture(git, &["config", "user.email"]).map_err(|e| SyncError::Config {
+        message: format!("unable to determine git user email: {}", e),
+    })
 }
 
-pub(in crate::providers) fn ensure_git_available(git: &Path) -> Result<()> {
+pub(in crate::providers) fn ensure_git_available(git: &Path) -> SyncResult<()> {
     let ok = Command::new(git)
         .arg("--version")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
-        .context("run git --version")?
+        .map_err(|_| SyncError::GitNotFound)?
         .success();
     if !ok {
-        Err(anyhow!("`git` not available on PATH"))
+        Err(SyncError::GitNotFound)
     } else {
         Ok(())
     }
 }
 
-fn run_git(git: &Path, repo: &Path, args: &[&str]) -> Result<()> {
-    let status = Command::new(git)
+fn run_git(git: &Path, repo: &Path, args: &[&str]) -> SyncResult<()> {
+    let out = Command::new(git)
         .arg("-C")
         .arg(repo)
         .args(args)
-        .status()
-        .with_context(|| format!("git {}", args.join(" ")))?;
-    if !status.success() {
-        return Err(anyhow!("git failed: {}", args.join(" ")));
+        .output()?;
+
+    if !out.status.success() {
+        return Err(SyncError::GitCommandFailed {
+            message: format!(
+                "git {} (exit {}): {}",
+                args.join(" "),
+                out.status.code().unwrap_or(-1),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+        });
     }
+
     Ok(())
 }
 
-fn run_git_config_capture(git: &Path, args: &[&str]) -> Result<String> {
+fn run_git_push(git: &Path, repo: &Path, branch: &str) -> SyncResult<()> {
     let out = Command::new(git)
-        .args(args)
-        .output()
-        .with_context(|| format!("git {}", args.join(" ")))?;
+        .arg("-C")
+        .arg(repo)
+        .args(["push", "-u", "origin", "--force", branch])
+        .output()?;
 
     if !out.status.success() {
-        return Err(anyhow!(
-            "git failed (exit {}): {}",
-            out.status.code().unwrap_or(-1),
-            String::from_utf8_lossy(&out.stderr)
-        ));
+        let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+        let lc = stderr.to_lowercase();
+        let source = anyhow!("git push failed: {}", stderr.trim());
+        if lc.contains("authentication failed") || lc.contains("permission denied") {
+            return Err(SyncError::AuthFailed { source });
+        }
+
+        return Err(SyncError::Network { source });
+    }
+
+    Ok(())
+}
+
+fn run_git_fetch(git: &Path, repo: &Path) -> SyncResult<()> {
+    let out = Command::new(git)
+        .arg("-C")
+        .arg(repo)
+        .args(["fetch", "origin", "--prune"])
+        .output()?;
+
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+        let lc = stderr.to_lowercase();
+        let source = anyhow!("git fetch failed: {}", stderr.trim());
+
+        if lc.contains("authentication failed") || lc.contains("permission denied") {
+            return Err(SyncError::AuthFailed { source });
+        }
+
+        return Err(SyncError::Network { source });
+    }
+
+    Ok(())
+}
+
+fn run_git_config_capture(git: &Path, args: &[&str]) -> SyncResult<String> {
+    let out = Command::new(git).args(args).output()?;
+
+    if !out.status.success() {
+        return Err(SyncError::GitCommandFailed {
+            message: format!(
+                "git {} (exit {}): {}",
+                args.join(" "),
+                out.status.code().unwrap_or(-1),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+        });
     }
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
-fn init_repo_if_needed(git: &Path, repo: &Path, branch: &str) -> Result<()> {
+fn init_repo_if_needed(git: &Path, repo: &Path, branch: &str) -> SyncResult<()> {
     let inside = Command::new(git)
         .arg("-C")
         .arg(repo)
@@ -223,19 +305,28 @@ fn init_repo_if_needed(git: &Path, repo: &Path, branch: &str) -> Result<()> {
     Ok(())
 }
 
-fn set_local_identity(git: &Path, repo: &Path, username: String, email: String) -> Result<()> {
-    run_git(git, repo, &["config", "user.name", &username])?;
-    run_git(git, repo, &["config", "user.email", &email])?;
+fn set_local_identity(
+    git: &Path,
+    repo: &Path,
+    username: String,
+    email: String,
+) -> SyncResult<()> {
+    run_git(git, repo, &["config", "user.name", &username]).map_err(|e| SyncError::Config {
+        message: format!("failed to set git user.name: {}", e),
+    })?;
+    run_git(git, repo, &["config", "user.email", &email]).map_err(|e| SyncError::Config {
+        message: format!("failed to set git user.email: {}", e),
+    })?;
 
     Ok(())
 }
 
-fn checkout_branch(git: &Path, repo: &Path, branch: &str) -> Result<()> {
+fn checkout_branch(git: &Path, repo: &Path, branch: &str) -> SyncResult<()> {
     run_git(git, repo, &["checkout", "-B", branch])?;
     Ok(())
 }
 
-fn set_origin(git: &Path, repo: &Path, url: &str) -> Result<()> {
+fn set_origin(git: &Path, repo: &Path, url: &str) -> SyncResult<()> {
     let has_origin = Command::new(git)
         .arg("-C")
         .arg(repo)
@@ -249,49 +340,48 @@ fn set_origin(git: &Path, repo: &Path, url: &str) -> Result<()> {
     if has_origin {
         run_git(git, repo, &["remote", "set-url", "origin", url])?;
     } else if Confirm::with_theme(&ColorfulTheme::default())
-    			.with_prompt(format!("Have you already created the remote origin '{url}' on the Git host so we can push to it?"))
-    			.default(false)
-    			.interact()?
-    		{
-    			run_git(git, repo, &["remote", "add", "origin", url])?;
-    		} else {
-    			return Err(anyhow!("Remote origin does not yet exist. Please create remote origin before synchronizing, then try again"));
-    		}
+        .with_prompt(format!(
+            "Have you already created the remote origin '{url}' on the Git host so we can push to it?"
+        ))
+        .default(false)
+        .interact()
+        .map_err(|e| SyncError::Config {
+            message: format!("prompt failed: {}", e),
+        })?
+    {
+        run_git(git, repo, &["remote", "add", "origin", url])?;
+    } else {
+        return Err(SyncError::Config {
+            message:
+                "Remote origin does not yet exist. Please create remote origin before synchronizing, then try again"
+                    .to_string(),
+        });
+    }
     Ok(())
 }
 
-fn stage_vault_only(git: &Path, repo: &Path) -> Result<()> {
+fn stage_vault_only(git: &Path, repo: &Path) -> SyncResult<()> {
     run_git(git, repo, &["add", "vault.yml"])?;
     Ok(())
 }
 
-fn fetch_and_pull(git: &Path, repo: &Path, branch: &str) -> Result<()> {
-    // Fetch all refs from origin (safe even if branch doesn't exist remotely)
-    run_git(git, repo, &["fetch", "origin", "--prune"])
-        .with_context(|| "Failed to fetch changes from remote")?;
+fn fetch_and_pull(git: &Path, repo: &Path, branch: &str) -> SyncResult<()> {
+    run_git_fetch(git, repo)?;
 
     let origin_ref = format!("origin/{branch}");
     let remote_has_branch = has_remote_branch(git, repo, branch);
 
-    // If the repo has no commits yet, prefer remote state and discard local
-    // if the remote branch exists. Otherwise, keep local state and allow an
-    // initial commit to be created and pushed.
     if !has_head(git, repo) {
         if remote_has_branch {
-            run_git(git, repo, &["checkout", "-f", "-B", branch, &origin_ref])
-                .with_context(|| "Failed to checkout remote branch over local state")?;
-            run_git(git, repo, &["reset", "--hard", &origin_ref])
-                .with_context(|| "Failed to hard reset to remote branch")?;
-            run_git(git, repo, &["clean", "-fd"])
-                .with_context(|| "Failed to clean untracked files")?;
+            run_git(git, repo, &["checkout", "-f", "-B", branch, &origin_ref])?;
+            run_git(git, repo, &["reset", "--hard", &origin_ref])?;
+            run_git(git, repo, &["clean", "-fd"])?;
         }
         return Ok(());
     }
 
-    // If we have local history and the remote branch exists, fast-forward.
     if remote_has_branch {
-        run_git(git, repo, &["merge", "--ff-only", &origin_ref])
-            .with_context(|| "Failed to merge remote changes")?;
+        run_git(git, repo, &["merge", "--ff-only", &origin_ref])?;
     }
     Ok(())
 }
@@ -325,13 +415,12 @@ fn has_head(git: &Path, repo: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn commit_now(git: &Path, repo: &Path, msg: &str) -> Result<()> {
+fn commit_now(git: &Path, repo: &Path, msg: &str) -> SyncResult<()> {
     let staged_changed = Command::new(git)
         .arg("-C")
         .arg(repo)
         .args(["diff", "--cached", "--quiet", "--exit-code"])
-        .status()
-        .context("git diff --cached")?
+        .status()?
         .code()
         .map(|c| c == 1)
         .unwrap_or(false);
@@ -399,12 +488,10 @@ mod tests {
 
     #[test]
     fn resolve_git_prefers_override_and_env() {
-        // Override path wins
         let override_path = Some(PathBuf::from("/custom/git"));
         let got = resolve_git(override_path.as_ref()).unwrap();
         assert_eq!(got, PathBuf::from("/custom/git"));
 
-        // If no override, env var is used
         unsafe {
             env::set_var("GIT_EXECUTABLE", "/env/git");
         }

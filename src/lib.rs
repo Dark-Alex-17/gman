@@ -36,6 +36,8 @@ pub mod config;
 /// Secret provider trait and implementations.
 pub mod providers;
 
+pub use providers::{SecretError, SyncError};
+
 pub(crate) const HEADER: &str = "$VAULT";
 pub(crate) const VERSION: &str = "v1";
 pub(crate) const KDF: &str = "argon2id";

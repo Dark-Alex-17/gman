@@ -68,6 +68,7 @@ azure_security_keyvault_secrets = "0.10.0"
 aws-lc-sys = { version = "0.39.0", features = ["bindgen"] }
 which = "8.0.0"
 once_cell = "1.21.3"
+thiserror = "2"
 
 [target.'cfg(all(target_os="linux", target_env="musl"))'.dependencies]
 openssl = { version = "0.10", features = ["vendored"] }

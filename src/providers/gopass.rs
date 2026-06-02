@@ -1,10 +1,23 @@
-use crate::providers::{ENV_PATH, SecretProvider};
-use anyhow::{Context, Result, anyhow};
-use serde::{Deserialize, Serialize};
-use serde_with::skip_serializing_none;
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
+
+use anyhow::anyhow;
+use serde::{Deserialize, Serialize};
+use serde_with::skip_serializing_none;
 use validator::Validate;
+
+use crate::providers::error::SecretError;
+use crate::providers::{ENV_PATH, SecretProvider};
+
+const PROVIDER: &str = "gopass";
+
+fn map_spawn_err(e: std::io::Error) -> SecretError {
+    if e.kind() == std::io::ErrorKind::NotFound {
+        SecretError::CliNotFound { tool: "gopass" }
+    } else {
+        SecretError::Io(e)
+    }
+}
 
 #[skip_serializing_none]
 /// Gopass-based secret provider
@@ -37,7 +50,7 @@ impl SecretProvider for GopassProvider {
         "GopassProvider"
     }
 
-    async fn get_secret(&self, key: &str) -> Result<String> {
+    async fn get_secret(&self, key: &str) -> Result<String, SecretError> {
         ensure_gopass_installed()?;
 
         let mut child = Command::new("gopass")
@@ -47,25 +60,27 @@ impl SecretProvider for GopassProvider {
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()
-            .context("Failed to spawn gopass command")?;
+            .map_err(map_spawn_err)?;
 
         let mut output = String::new();
         child
             .stdout
             .as_mut()
             .expect("Failed to open gopass stdout")
-            .read_to_string(&mut output)
-            .context("Failed to read gopass output")?;
+            .read_to_string(&mut output)?;
 
-        let status = child.wait().context("Failed to wait on gopass process")?;
+        let status = child.wait()?;
         if !status.success() {
-            return Err(anyhow!("gopass command failed with status: {}", status));
+            return Err(SecretError::NotFound {
+                key: key.to_string(),
+                provider: PROVIDER,
+            });
         }
 
         Ok(output.trim_end_matches(&['\r', '\n'][..]).to_string())
     }
 
-    async fn set_secret(&self, key: &str, value: &str) -> Result<()> {
+    async fn set_secret(&self, key: &str, value: &str) -> Result<(), SecretError> {
         ensure_gopass_installed()?;
 
         let mut child = Command::new("gopass")
@@ -73,32 +88,41 @@ impl SecretProvider for GopassProvider {
             .env("PATH", ENV_PATH.as_ref().expect("No ENV_PATH set"))
             .stdin(Stdio::piped())
             .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::piped())
             .spawn()
-            .context("Failed to spawn gopass command")?;
+            .map_err(map_spawn_err)?;
 
         {
             let stdin = child.stdin.as_mut().expect("Failed to open gopass stdin");
-            stdin
-                .write_all(value.as_bytes())
-                .context("Failed to write to gopass stdin")?;
+            stdin.write_all(value.as_bytes())?;
         }
 
-        let status = child.wait().context("Failed to wait on gopass process")?;
-        if !status.success() {
-            return Err(anyhow!("gopass command failed with status: {}", status));
+        let output = child.wait_with_output()?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.to_lowercase().contains("already exists") {
+                return Err(SecretError::AlreadyExists {
+                    key: key.to_string(),
+                    provider: PROVIDER,
+                });
+            }
+
+            return Err(SecretError::Other(anyhow!(
+                "gopass insert failed: {}",
+                stderr
+            )));
         }
 
         Ok(())
     }
 
-    async fn update_secret(&self, key: &str, value: &str) -> Result<()> {
+    async fn update_secret(&self, key: &str, value: &str) -> Result<(), SecretError> {
         ensure_gopass_installed()?;
 
         self.set_secret(key, value).await
     }
 
-    async fn delete_secret(&self, key: &str) -> Result<()> {
+    async fn delete_secret(&self, key: &str) -> Result<(), SecretError> {
         ensure_gopass_installed()?;
 
         let mut child = Command::new("gopass")
@@ -108,17 +132,20 @@ impl SecretProvider for GopassProvider {
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
             .spawn()
-            .context("Failed to spawn gopass command")?;
+            .map_err(map_spawn_err)?;
 
-        let status = child.wait().context("Failed to wait on gopass process")?;
+        let status = child.wait()?;
         if !status.success() {
-            return Err(anyhow!("gopass command failed with status: {}", status));
+            return Err(SecretError::NotFound {
+                key: key.to_string(),
+                provider: PROVIDER,
+            });
         }
 
         Ok(())
     }
 
-    async fn list_secrets(&self) -> Result<Vec<String>> {
+    async fn list_secrets(&self) -> Result<Vec<String>, SecretError> {
         ensure_gopass_installed()?;
 
         let mut child = Command::new("gopass")
@@ -126,21 +153,23 @@ impl SecretProvider for GopassProvider {
             .env("PATH", ENV_PATH.as_ref().expect("No ENV_PATH set"))
             .stdin(Stdio::inherit())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::piped())
             .spawn()
-            .context("Failed to spawn gopass command")?;
+            .map_err(map_spawn_err)?;
 
         let mut output = String::new();
         child
             .stdout
             .as_mut()
             .expect("Failed to open gopass stdout")
-            .read_to_string(&mut output)
-            .context("Failed to read gopass output")?;
+            .read_to_string(&mut output)?;
 
-        let status = child.wait().context("Failed to wait on gopass process")?;
-        if !status.success() {
-            return Err(anyhow!("gopass command failed with status: {}", status));
+        let result = child.wait_with_output()?;
+        if !result.status.success() {
+            return Err(SecretError::Other(anyhow!(
+                "gopass ls failed: {}",
+                String::from_utf8_lossy(&result.stderr)
+            )));
         }
 
         let secrets: Vec<String> = output
@@ -152,7 +181,7 @@ impl SecretProvider for GopassProvider {
         Ok(secrets)
     }
 
-    async fn sync(&mut self) -> Result<()> {
+    async fn sync(&mut self) -> Result<(), SecretError> {
         ensure_gopass_installed()?;
         let mut child = Command::new("gopass");
         child.arg("sync");
@@ -161,29 +190,32 @@ impl SecretProvider for GopassProvider {
             child.args(["-s", store]);
         }
 
-        let status = child
+        let output = child
             .env("PATH", ENV_PATH.as_ref().expect("No ENV_PATH set"))
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::piped())
             .spawn()
-            .context("Failed to spawn gopass command")?
-            .wait()
-            .context("Failed to wait on gopass process")?;
+            .map_err(map_spawn_err)?
+            .wait_with_output()?;
 
-        if !status.success() {
-            return Err(anyhow!("gopass command failed with status: {}", status));
+        if !output.status.success() {
+            return Err(SecretError::Network {
+                provider: PROVIDER,
+                source: anyhow!(
+                    "gopass sync failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ),
+            });
         }
 
         Ok(())
     }
 }
 
-fn ensure_gopass_installed() -> Result<()> {
+fn ensure_gopass_installed() -> Result<(), SecretError> {
     if which::which("gopass").is_err() {
-        Err(anyhow!(
-            "Gopass is not installed or not found in PATH. Please install Gopass from https://gopass.pw/"
-        ))
+        Err(SecretError::CliNotFound { tool: "gopass" })
     } else {
         Ok(())
     }

@@ -4,24 +4,29 @@
 //! interface used by the CLI.
 pub mod aws_secrets_manager;
 pub mod azure_key_vault;
+pub mod error;
 pub mod gcp_secret_manager;
-mod git_sync;
+pub mod git_sync;
 pub mod gopass;
 pub mod local;
 pub mod one_password;
 
-use crate::providers::gopass::GopassProvider;
-use crate::providers::local::LocalProvider;
-use crate::providers::one_password::OnePasswordProvider;
-use anyhow::{Context, Result, anyhow};
+use std::fmt::{Display, Formatter};
+use std::{env, fmt};
+
+use anyhow::{Context, Result};
 use aws_secrets_manager::AwsSecretsManagerProvider;
 use azure_key_vault::AzureKeyVaultProvider;
 use gcp_secret_manager::GcpSecretManagerProvider;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::fmt::{Display, Formatter};
-use std::{env, fmt};
 use validator::{Validate, ValidationErrors};
+
+pub use crate::providers::error::SecretError;
+pub use crate::providers::git_sync::SyncError;
+use crate::providers::gopass::GopassProvider;
+use crate::providers::local::LocalProvider;
+use crate::providers::one_password::OnePasswordProvider;
 
 pub(in crate::providers) static ENV_PATH: Lazy<Result<String>> =
     Lazy::new(|| env::var("PATH").context("No PATH environment variable"));
@@ -31,26 +36,26 @@ pub(in crate::providers) static ENV_PATH: Lazy<Result<String>> =
 #[async_trait::async_trait]
 pub trait SecretProvider: Send + Sync {
     fn name(&self) -> &'static str;
-    async fn get_secret(&self, key: &str) -> Result<String>;
-    async fn set_secret(&self, key: &str, value: &str) -> Result<()>;
-    async fn update_secret(&self, _key: &str, _value: &str) -> Result<()> {
-        Err(anyhow!(
-            "update secret not supported for provider {}",
-            self.name()
-        ))
+    async fn get_secret(&self, key: &str) -> Result<String, SecretError>;
+    async fn set_secret(&self, key: &str, value: &str) -> Result<(), SecretError>;
+    async fn update_secret(&self, _key: &str, _value: &str) -> Result<(), SecretError> {
+        Err(SecretError::Unsupported {
+            operation: "update_secret",
+            provider: self.name(),
+        })
     }
-    async fn delete_secret(&self, key: &str) -> Result<()>;
-    async fn list_secrets(&self) -> Result<Vec<String>> {
-        Err(anyhow!(
-            "list secrets is not supported for the provider {}",
-            self.name()
-        ))
+    async fn delete_secret(&self, key: &str) -> Result<(), SecretError>;
+    async fn list_secrets(&self) -> Result<Vec<String>, SecretError> {
+        Err(SecretError::Unsupported {
+            operation: "list_secrets",
+            provider: self.name(),
+        })
     }
-    async fn sync(&mut self) -> Result<()> {
-        Err(anyhow!(
-            "sync is not supported for the provider {}",
-            self.name()
-        ))
+    async fn sync(&mut self) -> Result<(), SecretError> {
+        Err(SecretError::Unsupported {
+            operation: "sync",
+            provider: self.name(),
+        })
     }
 }
 
@@ -117,3 +122,8 @@ impl Display for SupportedProvider {
         }
     }
 }
+
+#[allow(unused_imports)]
+pub(crate) use crate::providers::error::{
+    classify_aws_error, classify_azure_error, classify_gcp_error,
+};

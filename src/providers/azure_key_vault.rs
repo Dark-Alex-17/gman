@@ -1,5 +1,5 @@
-use crate::providers::SecretProvider;
-use anyhow::{Context, Result};
+use std::sync::Arc;
+
 use azure_core::credentials::TokenCredential;
 use azure_identity::DeveloperToolsCredential;
 use azure_security_keyvault_secrets::models::SetSecretParameters;
@@ -7,8 +7,12 @@ use azure_security_keyvault_secrets::{ResourceExt, SecretClient};
 use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
-use std::sync::Arc;
 use validator::Validate;
+
+use crate::providers::SecretProvider;
+use crate::providers::error::{SecretError, classify_azure_error};
+
+const PROVIDER: &str = "azure_key_vault";
 
 #[skip_serializing_none]
 /// Configuration for Azure Key Vault provider
@@ -41,43 +45,70 @@ impl SecretProvider for AzureKeyVaultProvider {
         "AzureKeyVaultProvider"
     }
 
-    async fn get_secret(&self, key: &str) -> Result<String> {
-        let response = self.get_client()?.get_secret(key, None).await?;
-        let body = response.into_model()?;
+    async fn get_secret(&self, key: &str) -> Result<String, SecretError> {
+        let response = self
+            .get_client()?
+            .get_secret(key, None)
+            .await
+            .map_err(|e| classify_azure_error(e.into(), Some(key), "get_secret"))?;
+        let body = response
+            .into_model()
+            .map_err(|e| SecretError::Other(e.into()))?;
 
-        body.value
-            .with_context(|| format!("Secret '{}' not found", key))
+        body.value.ok_or_else(|| SecretError::NotFound {
+            key: key.to_string(),
+            provider: PROVIDER,
+        })
     }
 
-    async fn set_secret(&self, key: &str, value: &str) -> Result<()> {
+    async fn set_secret(&self, key: &str, value: &str) -> Result<(), SecretError> {
         let params = SetSecretParameters {
             value: Some(value.to_string()),
             ..Default::default()
         };
 
+        let body = params
+            .try_into()
+            .map_err(|e: azure_core::Error| classify_azure_error(e.into(), Some(key), "set_secret"))?;
+
         self.get_client()?
-            .set_secret(key, params.try_into()?, None)
-            .await?
-            .into_model()?;
+            .set_secret(key, body, None)
+            .await
+            .map_err(|e| classify_azure_error(e.into(), Some(key), "set_secret"))?
+            .into_model()
+            .map_err(|e| SecretError::Other(e.into()))?;
 
         Ok(())
     }
 
-    async fn update_secret(&self, key: &str, value: &str) -> Result<()> {
+    async fn update_secret(&self, key: &str, value: &str) -> Result<(), SecretError> {
         self.set_secret(key, value).await
     }
 
-    async fn delete_secret(&self, key: &str) -> Result<()> {
-        self.get_client()?.delete_secret(key, None).await?;
+    async fn delete_secret(&self, key: &str) -> Result<(), SecretError> {
+        self.get_client()?
+            .delete_secret(key, None)
+            .await
+            .map_err(|e| classify_azure_error(e.into(), Some(key), "delete_secret"))?;
 
         Ok(())
     }
 
-    async fn list_secrets(&self) -> Result<Vec<String>> {
-        let mut pager = self.get_client()?.list_secret_properties(None)?;
+    async fn list_secrets(&self) -> Result<Vec<String>, SecretError> {
+        let mut pager = self
+            .get_client()?
+            .list_secret_properties(None)
+            .map_err(|e| classify_azure_error(e.into(), None, "list_secrets"))?;
         let mut secrets = Vec::new();
-        while let Some(props) = pager.try_next().await? {
-            let name = props.resource_id()?.name;
+        while let Some(props) = pager
+            .try_next()
+            .await
+            .map_err(|e| classify_azure_error(e.into(), None, "list_secrets"))?
+        {
+            let name = props
+                .resource_id()
+                .map_err(|e| SecretError::Other(e.into()))?
+                .name;
             secrets.push(name);
         }
 
@@ -86,17 +117,25 @@ impl SecretProvider for AzureKeyVaultProvider {
 }
 
 impl AzureKeyVaultProvider {
-    fn get_client(&self) -> Result<SecretClient> {
-        let credential: Arc<dyn TokenCredential> = DeveloperToolsCredential::new(None)?;
+    fn get_client(&self) -> Result<SecretClient, SecretError> {
+        let credential: Arc<dyn TokenCredential> =
+            DeveloperToolsCredential::new(None).map_err(|e| SecretError::AuthFailed {
+                provider: PROVIDER,
+                source: e.into(),
+            })?;
+        let vault_name = self.vault_name.as_ref().ok_or_else(|| SecretError::Config {
+            provider: PROVIDER,
+            message: "vault_name is required".to_string(),
+        })?;
         let client = SecretClient::new(
-            format!(
-                "https://{}.vault.azure.net",
-                self.vault_name.as_ref().unwrap()
-            )
-            .as_str(),
+            format!("https://{}.vault.azure.net", vault_name).as_str(),
             credential,
             None,
-        )?;
+        )
+        .map_err(|e| SecretError::Config {
+            provider: PROVIDER,
+            message: format!("failed to create Azure Key Vault client: {}", e),
+        })?;
 
         Ok(client)
     }

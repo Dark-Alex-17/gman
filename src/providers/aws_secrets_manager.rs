@@ -1,11 +1,13 @@
-use crate::providers::SecretProvider;
-use anyhow::Context;
-use anyhow::Result;
 use aws_config::Region;
 use aws_sdk_secretsmanager::Client;
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use validator::Validate;
+
+use crate::providers::error::{SecretError, classify_aws_error};
+use crate::providers::SecretProvider;
+
+const PROVIDER: &str = "aws_secrets_manager";
 
 #[skip_serializing_none]
 /// Configuration for AWS Secrets Manager provider
@@ -43,18 +45,21 @@ impl SecretProvider for AwsSecretsManagerProvider {
         "AwsSecretsManagerProvider"
     }
 
-    async fn get_secret(&self, key: &str) -> Result<String> {
-        self.get_client()
-            .await?
+    async fn get_secret(&self, key: &str) -> Result<String, SecretError> {
+        let client = self.get_client().await?;
+        let resp = client
             .get_secret_value()
             .secret_id(key)
             .send()
-            .await?
-            .secret_string
-            .with_context(|| format!("Secret '{key}' not found"))
+            .await
+            .map_err(|e| classify_aws_error(e.into(), Some(key), "get_secret"))?;
+        resp.secret_string.ok_or_else(|| SecretError::NotFound {
+            key: key.to_string(),
+            provider: PROVIDER,
+        })
     }
 
-    async fn set_secret(&self, key: &str, value: &str) -> Result<()> {
+    async fn set_secret(&self, key: &str, value: &str) -> Result<(), SecretError> {
         self.get_client()
             .await?
             .create_secret()
@@ -62,12 +67,12 @@ impl SecretProvider for AwsSecretsManagerProvider {
             .secret_string(value)
             .send()
             .await
-            .with_context(|| format!("Failed to set secret '{key}'"))?;
+            .map_err(|e| classify_aws_error(e.into(), Some(key), "set_secret"))?;
 
         Ok(())
     }
 
-    async fn update_secret(&self, key: &str, value: &str) -> Result<()> {
+    async fn update_secret(&self, key: &str, value: &str) -> Result<(), SecretError> {
         self.get_client()
             .await?
             .update_secret()
@@ -75,12 +80,12 @@ impl SecretProvider for AwsSecretsManagerProvider {
             .secret_string(value)
             .send()
             .await
-            .with_context(|| format!("Failed to update secret '{key}'"))?;
+            .map_err(|e| classify_aws_error(e.into(), Some(key), "update_secret"))?;
 
         Ok(())
     }
 
-    async fn delete_secret(&self, key: &str) -> Result<()> {
+    async fn delete_secret(&self, key: &str) -> Result<(), SecretError> {
         self.get_client()
             .await?
             .delete_secret()
@@ -88,32 +93,37 @@ impl SecretProvider for AwsSecretsManagerProvider {
             .force_delete_without_recovery(true)
             .send()
             .await
-            .with_context(|| format!("Failed to delete secret '{key}'"))?;
+            .map_err(|e| classify_aws_error(e.into(), Some(key), "delete_secret"))?;
         Ok(())
     }
 
-    async fn list_secrets(&self) -> Result<Vec<String>> {
-        self.get_client()
+    async fn list_secrets(&self) -> Result<Vec<String>, SecretError> {
+        let resp = self
+            .get_client()
             .await?
             .list_secrets()
             .send()
-            .await?
+            .await
+            .map_err(|e| classify_aws_error(e.into(), None, "list_secrets"))?;
+        Ok(resp
             .secret_list
-            .with_context(|| "No secrets found")
-            .map(|secrets| secrets.into_iter().filter_map(|s| s.name).collect())
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|s| s.name)
+            .collect())
     }
 }
 
 impl AwsSecretsManagerProvider {
-    async fn get_client(&self) -> Result<Client> {
-        let region = self
-            .aws_region
-            .clone()
-            .with_context(|| "aws_region is required")?;
-        let profile = self
-            .aws_profile
-            .clone()
-            .with_context(|| "aws_profile is required")?;
+    async fn get_client(&self) -> Result<Client, SecretError> {
+        let region = self.aws_region.clone().ok_or_else(|| SecretError::Config {
+            provider: PROVIDER,
+            message: "aws_region is required".to_string(),
+        })?;
+        let profile = self.aws_profile.clone().ok_or_else(|| SecretError::Config {
+            provider: PROVIDER,
+            message: "aws_profile is required".to_string(),
+        })?;
 
         let config = aws_config::from_env()
             .region(Region::new(region))
