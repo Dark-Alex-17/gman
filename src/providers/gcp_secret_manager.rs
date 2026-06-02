@@ -72,9 +72,8 @@ impl SecretProvider for GcpSecretManagerProvider {
             provider: PROVIDER,
         })?;
         let secret_value = payload.data.ref_sensitive_value().to_vec();
-        let secret_string = String::from_utf8(secret_value).map_err(|_| {
-            SecretError::Other(anyhow!("secret value is not valid UTF-8"))
-        })?;
+        let secret_string = String::from_utf8(secret_value)
+            .map_err(|_| SecretError::Other(anyhow!("secret value is not valid UTF-8")))?;
 
         Ok(secret_string)
     }

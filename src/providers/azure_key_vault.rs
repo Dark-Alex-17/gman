@@ -67,9 +67,9 @@ impl SecretProvider for AzureKeyVaultProvider {
             ..Default::default()
         };
 
-        let body = params
-            .try_into()
-            .map_err(|e: azure_core::Error| classify_azure_error(e.into(), Some(key), "set_secret"))?;
+        let body = params.try_into().map_err(|e: azure_core::Error| {
+            classify_azure_error(e.into(), Some(key), "set_secret")
+        })?;
 
         self.get_client()?
             .set_secret(key, body, None)
@@ -123,10 +123,13 @@ impl AzureKeyVaultProvider {
                 provider: PROVIDER,
                 source: e.into(),
             })?;
-        let vault_name = self.vault_name.as_ref().ok_or_else(|| SecretError::Config {
-            provider: PROVIDER,
-            message: "vault_name is required".to_string(),
-        })?;
+        let vault_name = self
+            .vault_name
+            .as_ref()
+            .ok_or_else(|| SecretError::Config {
+                provider: PROVIDER,
+                message: "vault_name is required".to_string(),
+            })?;
         let client = SecretClient::new(
             format!("https://{}.vault.azure.net", vault_name).as_str(),
             credential,

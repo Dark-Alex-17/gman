@@ -1,13 +1,13 @@
-use std::io;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::{env, fs};
 use anyhow::anyhow;
 use chrono::Utc;
 use dialoguer::Confirm;
 use dialoguer::theme::ColorfulTheme;
 use indoc::formatdoc;
 use log::debug;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::{env, fs};
 use thiserror::Error;
 use validator::Validate;
 
@@ -78,9 +78,11 @@ pub fn sync_and_push(opts: &SyncOpts<'_>) -> SyncResult<()> {
     let repo_dir = config_dir.join(format!(".{}", repo_name));
     fs::create_dir_all(&repo_dir)?;
 
-    let default_vault = confy::get_configuration_file_path(&calling_app_name(), "vault")
-        .map_err(|e| SyncError::Config {
-            message: format!("get default vault path: {}", e),
+    let default_vault =
+        confy::get_configuration_file_path(&calling_app_name(), "vault").map_err(|e| {
+            SyncError::Config {
+                message: format!("get default vault path: {}", e),
+            }
         })?;
     let repo_vault = repo_dir.join("vault.yml");
     if default_vault.exists() && !repo_vault.exists() {
@@ -156,9 +158,7 @@ fn resolve_git_email(git: &Path, email: Option<&String>) -> SyncResult<String> {
     })
 }
 
-pub(in crate::providers) fn resolve_git(
-    override_path: Option<&PathBuf>,
-) -> SyncResult<PathBuf> {
+pub(in crate::providers) fn resolve_git(override_path: Option<&PathBuf>) -> SyncResult<PathBuf> {
     debug!("Resolving git executable");
     if let Some(p) = override_path {
         return Ok(p.to_path_buf());
@@ -199,11 +199,7 @@ pub(in crate::providers) fn ensure_git_available(git: &Path) -> SyncResult<()> {
 }
 
 fn run_git(git: &Path, repo: &Path, args: &[&str]) -> SyncResult<()> {
-    let out = Command::new(git)
-        .arg("-C")
-        .arg(repo)
-        .args(args)
-        .output()?;
+    let out = Command::new(git).arg("-C").arg(repo).args(args).output()?;
 
     if !out.status.success() {
         return Err(SyncError::GitCommandFailed {
@@ -305,12 +301,7 @@ fn init_repo_if_needed(git: &Path, repo: &Path, branch: &str) -> SyncResult<()> 
     Ok(())
 }
 
-fn set_local_identity(
-    git: &Path,
-    repo: &Path,
-    username: String,
-    email: String,
-) -> SyncResult<()> {
+fn set_local_identity(git: &Path, repo: &Path, username: String, email: String) -> SyncResult<()> {
     run_git(git, repo, &["config", "user.name", &username]).map_err(|e| SyncError::Config {
         message: format!("failed to set git user.name: {}", e),
     })?;

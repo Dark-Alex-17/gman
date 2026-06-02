@@ -128,8 +128,7 @@ impl SecretProvider for LocalProvider {
         }
 
         let password = self.get_password()?;
-        let envelope =
-            encrypt_string(&password, value).map_err(SecretError::Other)?;
+        let envelope = encrypt_string(&password, value).map_err(SecretError::Other)?;
         drop(password);
 
         vault.insert(key.to_string(), envelope);
@@ -142,8 +141,7 @@ impl SecretProvider for LocalProvider {
         let mut vault: HashMap<String, String> = load_vault(&vault_path).unwrap_or_default();
 
         let password = self.get_password()?;
-        let envelope =
-            encrypt_string(&password, value).map_err(SecretError::Other)?;
+        let envelope = encrypt_string(&password, value).map_err(SecretError::Other)?;
         drop(password);
 
         if vault.contains_key(key) {
@@ -373,12 +371,8 @@ impl LocalProvider {
                 }
             }
 
-            let password = SecretString::new(
-                fs::read_to_string(password_file)?
-                    .trim()
-                    .to_string()
-                    .into(),
-            );
+            let password =
+                SecretString::new(fs::read_to_string(password_file)?.trim().to_string().into());
 
             Ok(password)
         } else {
@@ -600,11 +594,12 @@ fn decrypt_string(password: &SecretString, envelope: &str) -> LocalResult<String
 
     let aad_current = format!("{};{};{};m={},t={},p={}", HEADER, VERSION, KDF, m, t, p);
 
-    let mut key = derive_key_with_params(password, &salt, m, t, p)
-        .map_err(|source| SecretError::AuthFailed {
+    let mut key = derive_key_with_params(password, &salt, m, t, p).map_err(|source| {
+        SecretError::AuthFailed {
             provider: PROVIDER,
             source,
-        })?;
+        }
+    })?;
     let cipher = XChaCha20Poly1305::new(&key);
 
     if let Ok(pt) = try_decrypt(&cipher, &nonce, &ct, aad_current.as_bytes()) {

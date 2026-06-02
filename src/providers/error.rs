@@ -1,5 +1,5 @@
-use std::io;
 use anyhow::anyhow;
+use std::io;
 use thiserror::Error;
 
 use crate::providers::git_sync::SyncError;
@@ -105,13 +105,19 @@ pub(crate) fn classify_aws_error(
         || chain_text.contains("unauthorized")
         || chain_text.contains("unrecognizedclient")
     {
-        SecretError::AuthFailed { provider, source: err }
+        SecretError::AuthFailed {
+            provider,
+            source: err,
+        }
     } else if chain_text.contains("dispatch failure")
         || chain_text.contains("timeout")
         || chain_text.contains("connection")
         || chain_text.contains("dns")
     {
-        SecretError::Network { provider, source: err }
+        SecretError::Network {
+            provider,
+            source: err,
+        }
     } else {
         SecretError::Other(err)
     }
@@ -165,9 +171,15 @@ pub(crate) fn classify_gcp_error(
             provider,
         }
     } else if chain_text.contains("unauthenticated") || chain_text.contains("permissiondenied") {
-        SecretError::AuthFailed { provider, source: err }
+        SecretError::AuthFailed {
+            provider,
+            source: err,
+        }
     } else if chain_text.contains("unavailable") || chain_text.contains("deadlineexceeded") {
-        SecretError::Network { provider, source: err }
+        SecretError::Network {
+            provider,
+            source: err,
+        }
     } else {
         SecretError::Other(err)
     }
@@ -185,7 +197,10 @@ pub(crate) fn classify_azure_error(
         if let ErrorKind::HttpResponse { status, .. } = azure_err.kind() {
             let code = u16::from(*status);
             return match code {
-                401 | 403 => SecretError::AuthFailed { provider, source: err },
+                401 | 403 => SecretError::AuthFailed {
+                    provider,
+                    source: err,
+                },
                 404 => SecretError::NotFound {
                     key: key.unwrap_or("").to_string(),
                     provider,
@@ -213,12 +228,18 @@ pub(crate) fn classify_azure_error(
         || chain_text.contains("403")
         || chain_text.contains("authentication")
     {
-        SecretError::AuthFailed { provider, source: err }
+        SecretError::AuthFailed {
+            provider,
+            source: err,
+        }
     } else if chain_text.contains("timeout")
         || chain_text.contains("connection")
         || chain_text.contains("dns")
     {
-        SecretError::Network { provider, source: err }
+        SecretError::Network {
+            provider,
+            source: err,
+        }
     } else {
         SecretError::Other(err)
     }

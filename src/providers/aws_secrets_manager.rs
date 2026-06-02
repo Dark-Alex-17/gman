@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use validator::Validate;
 
-use crate::providers::error::{SecretError, classify_aws_error};
 use crate::providers::SecretProvider;
+use crate::providers::error::{SecretError, classify_aws_error};
 
 const PROVIDER: &str = "aws_secrets_manager";
 
@@ -120,10 +120,13 @@ impl AwsSecretsManagerProvider {
             provider: PROVIDER,
             message: "aws_region is required".to_string(),
         })?;
-        let profile = self.aws_profile.clone().ok_or_else(|| SecretError::Config {
-            provider: PROVIDER,
-            message: "aws_profile is required".to_string(),
-        })?;
+        let profile = self
+            .aws_profile
+            .clone()
+            .ok_or_else(|| SecretError::Config {
+                provider: PROVIDER,
+                message: "aws_profile is required".to_string(),
+            })?;
 
         let config = aws_config::from_env()
             .region(Region::new(region))
