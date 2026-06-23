@@ -1,8 +1,8 @@
 use crate::command::preview_command;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use clap_complete::CompletionCandidate;
 use futures::future::join_all;
-use gman::config::{Config, RunConfig, load_config};
+use gman::config::{load_config, Config, RunConfig};
 use log::{debug, error};
 use regex::Regex;
 use std::collections::HashMap;
@@ -167,7 +167,7 @@ fn generate_files_secret_injections(
     secrets: HashMap<&str, String>,
     run_config: &RunConfig,
 ) -> Result<Vec<(PathBuf, String, String)>> {
-    let re = Regex::new(r"\{\{(.+)}}")?;
+    let re = Regex::new(r"\{\{\s*(.+?)\s*}}")?;
     let mut results = Vec::new();
     for file in run_config
         .files
@@ -356,6 +356,86 @@ mod tests {
         assert_eq!(result[0].0, file_path);
         assert_str_eq!(result[0].1, "{{testing/SOME-secret}}");
         assert_str_eq!(result[0].2, "value1");
+    }
+
+    #[test]
+    fn test_generate_files_secret_injections_tolerates_whitespace_around_key() {
+        let mut secrets = HashMap::new();
+        secrets.insert("api/gmail/email/meli_password", "hunter2".to_string());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("test.toml");
+        fs::write(
+            &file_path,
+            "server_password = \"{{ api/gmail/email/meli_password }}\"\nother = \"{{\tapi/gmail/email/meli_password\t}}\"",
+        )
+        .unwrap();
+
+        let run_config = RunConfig {
+            name: Some("meli".to_string()),
+            provider: None,
+            secrets: Some(vec!["api/gmail/email/meli_password".to_string()]),
+            files: Some(vec![file_path.clone()]),
+            flag: None,
+            flag_position: None,
+            arg_format: None,
+        };
+
+        let result = generate_files_secret_injections(secrets, &run_config).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_str_eq!(
+            result[0].2,
+            "server_password = \"hunter2\"\nother = \"hunter2\""
+        );
+    }
+
+    #[test]
+    fn test_generate_files_secret_injections_handles_multiple_placeholders_on_one_line() {
+        let mut secrets = HashMap::new();
+        secrets.insert("a", "alpha".to_string());
+        secrets.insert("b", "beta".to_string());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("test.txt");
+        fs::write(&file_path, "{{a}} foo {{ b }}").unwrap();
+
+        let run_config = RunConfig {
+            name: Some("test".to_string()),
+            provider: None,
+            secrets: Some(vec!["a".to_string(), "b".to_string()]),
+            files: Some(vec![file_path.clone()]),
+            flag: None,
+            flag_position: None,
+            arg_format: None,
+        };
+
+        let result = generate_files_secret_injections(secrets, &run_config).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_str_eq!(result[0].2, "alpha foo beta");
+    }
+
+    #[test]
+    fn test_generate_files_secret_injections_leaves_unknown_keys_untouched() {
+        let mut secrets = HashMap::new();
+        secrets.insert("known", "value".to_string());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("test.txt");
+        fs::write(&file_path, "{{known}} {{ unknown }}").unwrap();
+
+        let run_config = RunConfig {
+            name: Some("test".to_string()),
+            provider: None,
+            secrets: Some(vec!["known".to_string()]),
+            files: Some(vec![file_path.clone()]),
+            flag: None,
+            flag_position: None,
+            arg_format: None,
+        };
+
+        let result = generate_files_secret_injections(secrets, &run_config).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_str_eq!(result[0].2, "value {{ unknown }}");
     }
 
     #[test]
