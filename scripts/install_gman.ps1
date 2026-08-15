@@ -39,19 +39,13 @@ switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {
 
 if (-not $BinDir) {
   if ($isWin) { $BinDir = Join-Path $env:LOCALAPPDATA 'gman\bin' }
-  else { $home = $env:HOME; if (-not $home) { $home = (Get-Item -Path ~).FullName }; $BinDir = Join-Path $home '.local/bin' }
+  else { $userHome = $env:HOME; if (-not $userHome) { $userHome = (Get-Item -Path ~).FullName }; $BinDir = Join-Path $userHome '.local/bin' }
 }
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 
 Write-Info "Target: $os-$arch"
 
-$apiBase = "https://api.github.com/repos/$Repo/releases"
-$relUrl = if ($Version) { "$apiBase/tags/$Version" } else { "$apiBase/latest" }
-Write-Info "Fetching release: $relUrl"
-try {
-  $release = Invoke-RestMethod -UseBasicParsing -Headers @{ 'User-Agent' = 'gman-installer' } -Uri $relUrl -Method GET
-} catch { Fail "Failed to fetch release metadata. $_" }
-if (-not $release.assets) { Fail "No assets found in the release." }
+$dlBase = if ($Version) { "https://github.com/$Repo/releases/download/$Version" } else { "https://github.com/$Repo/releases/latest/download" }
 
 $candidates = @()
 if ($os -eq 'windows') {
@@ -62,8 +56,8 @@ if ($os -eq 'windows') {
   else { $candidates += 'gman-aarch64-apple-darwin.tar.gz' }
 } elseif ($os -eq 'linux') {
   if ($arch -eq 'x86_64') {
-    $candidates += 'gman-x86_64-unknown-linux-gnu.tar.gz'
     $candidates += 'gman-x86_64-unknown-linux-musl.tar.gz'
+    $candidates += 'gman-x86_64-unknown-linux-gnu.tar.gz'
   } else {
     $candidates += 'gman-aarch64-unknown-linux-musl.tar.gz'
   }
@@ -71,37 +65,42 @@ if ($os -eq 'windows') {
   Fail "Unsupported OS for this installer: $os"
 }
 
-$asset = $null
+$tmp = New-Item -ItemType Directory -Force -Path ([IO.Path]::Combine([IO.Path]::GetTempPath(), "gman-$(Get-Random)"))
+$archive = Join-Path $tmp.FullName 'asset'
+
+$assetName = $null; $assetUrl = $null
 foreach ($c in $candidates) {
-  $asset = $release.assets | Where-Object { $_.name -eq $c } | Select-Object -First 1
-  if ($asset) { break }
+  $url = "$dlBase/$c"
+  Write-Info "Trying $url"
+  try {
+    Invoke-WebRequest -UseBasicParsing -Headers @{ 'User-Agent' = 'gman-installer' } -Uri $url -OutFile $archive -ErrorAction Stop
+    $assetName = $c; $assetUrl = $url
+    break
+  } catch { continue }
 }
-if (-not $asset) {
-  Write-Error "No matching asset found for $os-$arch. Tried:"; $candidates | ForEach-Object { Write-Error "  - $_" }
+if (-not $assetName) {
+  $verLabel = if ($Version) { $Version } else { 'latest' }
+  Write-Error "No matching asset found for $os-$arch (version: $verLabel). Tried:"; $candidates | ForEach-Object { Write-Error "  - $_" }
   exit 1
 }
 
-Write-Info "Selected asset: $($asset.name)"
-Write-Info "Download URL:  $($asset.browser_download_url)"
-
-$tmp = New-Item -ItemType Directory -Force -Path ([IO.Path]::Combine([IO.Path]::GetTempPath(), "gman-$(Get-Random)"))
-$archive = Join-Path $tmp.FullName 'asset'
-try { Invoke-WebRequest -UseBasicParsing -Headers @{ 'User-Agent' = 'gman-installer' } -Uri $asset.browser_download_url -OutFile $archive } catch { Fail "Failed to download asset. $_" }
+Write-Info "Selected asset: $assetName"
+Write-Info "Download URL:  $assetUrl"
 
 $extractDir = Join-Path $tmp.FullName 'extract'; New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
 
-if ($asset.name -match '\.zip$') {
+if ($assetName -match '\.zip$') {
   Add-Type -AssemblyName System.IO.Compression.FileSystem
   [System.IO.Compression.ZipFile]::ExtractToDirectory($archive, $extractDir)
-} elseif ($asset.name -match '\.tar\.gz$' -or $asset.name -match '\.tgz$') {
+} elseif ($assetName -match '\.tar\.gz$' -or $assetName -match '\.tgz$') {
   $tar = Get-Command tar -ErrorAction SilentlyContinue
-  if ($tar) { & $tar.FullName -xzf $archive -C $extractDir }
+  if ($tar) { & $tar.Source -xzf $archive -C $extractDir }
   else { Fail "Asset is tar archive but 'tar' is not available." }
 } else {
   try { Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory($archive, $extractDir) }
   catch {
     $tar = Get-Command tar -ErrorAction SilentlyContinue
-    if ($tar) { & $tar.FullName -xf $archive -C $extractDir } else { Fail "Unknown archive format; neither zip nor tar workable." }
+    if ($tar) { & $tar.Source -xf $archive -C $extractDir } else { Fail "Unknown archive format; neither zip nor tar workable." }
   }
 }
 
