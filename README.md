@@ -142,7 +142,7 @@ You can use the following command to run a bash script that downloads and instal
 OS (Linux/MacOS) and architecture (x86_64/arm64):
 
 ```shell
-curl -fsSL https://raw.githubusercontent.com/Dark-Alex-17/gman/main/install_gman.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Dark-Alex-17/gman/main/scripts/install_gman.sh | bash
 ```
 
 #### Windows/Linux/MacOS (`PowerShell`)

@@ -83,30 +83,22 @@ esac
 
 log "Target: ${OS}-${ARCH}"
 
-API_BASE="https://api.github.com/repos/${REPO}/releases"
 if [[ -z "${VERSION}" ]]; then
-  RELEASE_URL="${API_BASE}/latest"
+  DL_BASE="https://github.com/${REPO}/releases/latest/download"
 else
-  RELEASE_URL="${API_BASE}/tags/${VERSION}"
+  DL_BASE="https://github.com/${REPO}/releases/download/${VERSION}"
 fi
 
-http_get() {
+download() {
   if [[ "$DL" == "curl" ]]; then
-    curl -fsSL -H 'User-Agent: gman-installer' "$1"
+    curl -fsSL -H 'User-Agent: gman-installer' "$1" -o "$2"
   else
-    wget -qO- --header='User-Agent: gman-installer' "$1"
+    wget -q --header='User-Agent: gman-installer' "$1" -O "$2"
   fi
 }
 
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
-
-log "Fetching release metadata from $RELEASE_URL"
-JSON="$TMPDIR/release.json"
-if ! http_get "$RELEASE_URL" > "$JSON"; then
-  echo "Error: failed to fetch release metadata. Check version tag." >&2
-  exit 1
-fi
 
 ASSET_CANDIDATES=()
 if [[ "$OS" == "darwin" ]]; then
@@ -117,15 +109,8 @@ if [[ "$OS" == "darwin" ]]; then
   fi
 elif [[ "$OS" == "linux" ]]; then
   if [[ "$ARCH" == "x86_64" ]]; then
-    LIBC="musl"
-    if command -v getconf >/dev/null 2>&1 && getconf GNU_LIBC_VERSION >/dev/null 2>&1; then LIBC="gnu"; fi
-    if ldd --version 2>&1 | grep -qi glibc; then LIBC="gnu"; fi
-
-    if [[ "$LIBC" == "gnu" ]]; then
-      ASSET_CANDIDATES+=("gman-x86_64-unknown-linux-gnu.tar.gz")
-    fi
-
     ASSET_CANDIDATES+=("gman-x86_64-unknown-linux-musl.tar.gz")
+    ASSET_CANDIDATES+=("gman-x86_64-unknown-linux-gnu.tar.gz")
   else
     ASSET_CANDIDATES+=("gman-aarch64-unknown-linux-musl.tar.gz")
   fi
@@ -133,47 +118,26 @@ else
   echo "Error: unsupported OS for this installer: $OS" >&2; exit 1
 fi
 
+ARCHIVE="$TMPDIR/asset"
 ASSET_NAME=""; ASSET_URL=""
 for candidate in "${ASSET_CANDIDATES[@]}"; do
-  NAME=$(grep -oE '"name":\s*"[^"]+"' "$JSON" | sed 's/"name":\s*"//; s/"$//' | grep -Fx "$candidate" || true)
-  if [[ -n "$NAME" ]]; then
-    ASSET_NAME="$NAME"
-    ASSET_URL=$(awk -v pat="$NAME" '
-      BEGIN{ FS=":"; want=0 }
-      /"name"/ {
-        line=$0;
-        gsub(/^\s+|\s+$/,"",line);
-        gsub(/"name"\s*:\s*"|"/ ,"", line);
-        want = (line==pat) ? 1 : 0;
-        next
-      }
-      want==1 && /"browser_download_url"/ {
-        u=$0;
-        gsub(/^\s+|\s+$/,"",u);
-        gsub(/.*"browser_download_url"\s*:\s*"|".*/ ,"", u);
-        print u;
-        exit
-      }
-    ' "$JSON")
-    if [[ -n "$ASSET_URL" ]]; then break; fi
+  URL="${DL_BASE}/${candidate}"
+  log "Trying ${URL}"
+  if download "$URL" "$ARCHIVE"; then
+    ASSET_NAME="$candidate"
+    ASSET_URL="$URL"
+    break
   fi
 done
 
-if [[ -z "$ASSET_URL" ]]; then
-  echo "Error: no matching asset found for ${OS}-${ARCH}. Tried:" >&2
+if [[ -z "$ASSET_NAME" ]]; then
+  echo "Error: no matching asset found for ${OS}-${ARCH} (version: ${VERSION:-latest}). Tried:" >&2
   for c in "${ASSET_CANDIDATES[@]}"; do echo "  - $c" >&2; done
   exit 1
 fi
 
 log "Selected asset: $ASSET_NAME"
 log "Download URL: $ASSET_URL"
-
-ARCHIVE="$TMPDIR/asset"
-if [[ "$DL" == "curl" ]]; then
-  curl -fL -H 'User-Agent: gman-installer' "$ASSET_URL" -o "$ARCHIVE"
-else
-  wget -q --header='User-Agent: gman-installer' "$ASSET_URL" -O "$ARCHIVE"
-fi
 
 WORK="$TMPDIR/work"; mkdir -p "$WORK"
 EXTRACTED_DIR="$WORK/extracted"; mkdir -p "$EXTRACTED_DIR"
